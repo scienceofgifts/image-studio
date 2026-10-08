@@ -1,0 +1,8 @@
+{
+  "name": "Science of Gifts - Image Design Studio",
+  "description": "An editorial and design workspace to conceptualize, refine, and document visual designs and written gift concepts, producing optimized AI prompts and briefs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

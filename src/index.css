@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-serif: 'Newsreader', Georgia, serif;
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  body {
+    background-color: #faf8f5;
+    color: #1c1917;
+    font-family: var(--font-sans);
+  }
+
+  h1, h2, h3, h4, .font-serif {
+    font-family: var(--font-serif);
+  }
+}
+
+
