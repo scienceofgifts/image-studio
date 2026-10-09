@@ -261,4 +261,14 @@ export interface AggregateVisualProfile {
   updatedAt: string;
 }
 
+export interface DirectionProfile {
+  id: string;
+  name: string;
+  version?: number;
+  visualDirection: StructuredVisualDirection;
+  creativeDirection?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type ReferenceAnalysis = InspirationAnalysisRecord;

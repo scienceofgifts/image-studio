@@ -1,4 +1,4 @@
-import { ImageProject, SavedConceptItem, InspirationReference, VisualProfile, SynthesisConcept } from '../types';
+import { ImageProject, SavedConceptItem, InspirationReference, VisualProfile, SynthesisConcept, DirectionProfile } from '../types';
 
 export const DEFAULT_PROMPT_INSTRUCTIONS = 
   "Translate the approved design brief into a precise, concrete image-generation prompt. Strictly describe the actual subject, composition, visual hierarchy, typography, illustration style, color palette, and production requirements specified in the brief. Never substitute the user's specific subject with generic stock scenes (such as gift boxes, generic packaging, or luxury product photos). Strictly prohibit generic filler phrases like '8k resolution', 'masterpiece', 'hyper-realistic', 'stunning', 'studio lighting', or arbitrary stock photography language unless explicitly required by the design brief.";
@@ -8,7 +8,8 @@ const STORAGE_KEYS = {
   SAVED_CONCEPTS: 'sog_saved_concepts_v2',
   INSPIRATION_LIBRARY: 'sog_inspiration_library_v2',
   VISUAL_PROFILES: 'sog_visual_profiles_v2',
-  SYNTHESIS_CONCEPTS: 'sog_synthesis_concepts_v2'
+  SYNTHESIS_CONCEPTS: 'sog_synthesis_concepts_v2',
+  DIRECTION_PROFILES: 'sog_direction_profiles_v1'
 };
 
 // Seed sample initial image project
@@ -665,4 +666,84 @@ export function safeStringify(obj: any): string {
     return value;
   });
 }
+
+const DEFAULT_DIRECTION_PROFILES: DirectionProfile[] = [
+  {
+    id: 'prof-victorian-specimen',
+    name: 'Victorian Museum Specimen',
+    version: 1,
+    visualDirection: {
+      composition: 'Centered specimen plaque frame with formal border lines',
+      typography: '19th-century slab serif with monospaced catalog numbering',
+      illustration: 'Fine copperplate woodcut etching with cross-hatching',
+      color: 'Monochrome deep iron black on warm off-white parchment canvas',
+      texture: 'Authentic aged paper grain and slight ink impression',
+      era: 'Victorian archival museum specimen (c. 1885)',
+      mood: 'Scholarly, witty, honorable, nostalgic',
+      visualHierarchy: 'Central specimen illustration leading to top accession tag and bottom motto'
+    },
+    creativeDirection: 'Ensure formal museum catalog layout with crisp two-color etching linework.',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'prof-academic-crest',
+    name: 'Classic Academic Crest',
+    version: 1,
+    visualDirection: {
+      composition: 'Symmetrical circular badge with ribbon banner',
+      typography: 'Bold condensed block serif inside circular arc',
+      illustration: 'Woodcut print style with sharp black-and-white contrast',
+      color: 'Cool Academic (Navy, Slate, White)',
+      texture: 'Clean vector screen print',
+      era: 'Archival collegiate classic',
+      mood: 'Authoritative, collegiate, honorable',
+      visualHierarchy: 'Primary focal crest emblem centered with curved banner'
+    },
+    creativeDirection: 'Maintain clean vector lines suitable for apparel embroidery and badges.',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
+];
+
+export function getDirectionProfiles(): DirectionProfile[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DIRECTION_PROFILES);
+    if (!raw) {
+      localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(DEFAULT_DIRECTION_PROFILES));
+      return DEFAULT_DIRECTION_PROFILES;
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_DIRECTION_PROFILES;
+  } catch (e) {
+    console.error('Failed to load direction profiles:', e);
+    return DEFAULT_DIRECTION_PROFILES;
+  }
+}
+
+export function saveDirectionProfile(profile: DirectionProfile): void {
+  try {
+    const profiles = getDirectionProfiles();
+    const index = profiles.findIndex(p => p.id === profile.id);
+    const updatedProfile = { ...profile, updatedAt: new Date().toISOString() };
+    if (index >= 0) {
+      profiles[index] = updatedProfile;
+    } else {
+      profiles.unshift(updatedProfile);
+    }
+    localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(profiles));
+  } catch (e) {
+    console.error('Failed to save direction profile:', e);
+  }
+}
+
+export function deleteDirectionProfile(id: string): void {
+  try {
+    const profiles = getDirectionProfiles().filter(p => p.id !== id);
+    localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(profiles));
+  } catch (e) {
+    console.error('Failed to delete direction profile:', e);
+  }
+}
+
 

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { ImageProject, ImageIdea, OutputMode, StructuredVisualDirection } from '../../types';
-import { StructuredVisualParametersSelector } from './StructuredVisualParametersSelector';
+import { ImageProject, ImageIdea, OutputMode } from '../../types';
 import { ModelSelector } from '../common/ModelSelector';
 import { getGlobalDefaultModel } from '../../utils/models';
 import { Sparkles, Lightbulb, Package, Check, ArrowRight, Compass, Image as ImageIcon } from 'lucide-react';
@@ -21,7 +20,6 @@ export const IdeaStep: React.FC<IdeaStepProps> = ({
   const [idea, setIdea] = useState<ImageIdea>(project.imageIdea);
   const [outputMode, setOutputMode] = useState<OutputMode>(project.outputMode || 'Finished Artwork');
   const [intendedOutput, setIntendedOutput] = useState<string>(project.intendedOutput || 'T-Shirt Graphic');
-  const [creativeDir, setCreativeDir] = useState<string>(project.creativeDirection || '');
   const [conceptTaskModel, setConceptTaskModel] = useState<string>(getGlobalDefaultModel());
 
   const products = ['T-Shirt', 'Hoodie', 'Mug', 'Poster', 'Journal', 'Water Bottle', 'Scientific Print', 'Other'];
@@ -54,21 +52,6 @@ export const IdeaStep: React.FC<IdeaStepProps> = ({
     onUpdateProject({ ...project, outputMode: mode });
   };
 
-  const handleVisualDirectionChange = (updatedDirection: StructuredVisualDirection) => {
-    onUpdateProject({
-      ...project,
-      visualDirection: updatedDirection
-    });
-  };
-
-  const handleCreativeDirectionChange = (val: string) => {
-    setCreativeDir(val);
-    onUpdateProject({
-      ...project,
-      creativeDirection: val
-    });
-  };
-
   const sampleIdeas = ['History Teacher', 'Civil War History Buff', 'Viking Mythology', 'Filmmaker', 'Psychology Professor', 'Botanical Explorer'];
 
   return (
@@ -81,21 +64,21 @@ export const IdeaStep: React.FC<IdeaStepProps> = ({
           </div>
           <div>
             <span className="text-[10px] font-mono uppercase tracking-wider text-amber-800 font-semibold block mb-0.5">
-              STAGE 01 · VISUAL FOUNDATION
+              STAGE 01 · WHAT THE DESIGN COMMUNICATES
             </span>
-            <h2 className="text-xl font-serif text-stone-900 font-semibold">Image Idea &amp; Visual Direction</h2>
+            <h2 className="text-xl font-serif text-stone-900 font-semibold">Image Idea &amp; Core Subject</h2>
             <p className="text-xs text-stone-600 mt-1 leading-relaxed">
-              Start with your core subject and select visual parameters below. Image Studio will translate your choices into 5 distinct visual design concepts.
+              Define your core subject, thematic angle, and symbolism. Visual styling and aesthetic parameters will be configured in the Direction stage.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Freeform Core Idea Input */}
-      <div className="bg-white border border-stone-200/80 rounded-2xl p-6 space-y-4 shadow-2xs">
-        <div>
-          <label className="block text-xs font-semibold text-stone-900 uppercase tracking-wider mb-2">
-            Core Image Subject / Idea <span className="text-amber-700">*</span>
+      {/* Freeform Core Idea & Subject Details */}
+      <div className="bg-white border border-stone-200/80 rounded-2xl p-6 space-y-6 shadow-2xs">
+        <div className="space-y-3">
+          <label className="block text-xs font-semibold text-stone-900 uppercase tracking-wider">
+            Core Image Subject / Concept <span className="text-amber-700">*</span>
           </label>
           <input
             type="text"
@@ -104,7 +87,7 @@ export const IdeaStep: React.FC<IdeaStepProps> = ({
             placeholder="e.g. History Teacher, Civil War Buff, Viking Mythology, Filmmaker..."
             className="w-full px-4 py-3 bg-stone-50 border border-stone-300 rounded-xl text-stone-900 text-base placeholder-stone-400 focus:outline-none focus:border-amber-600 transition-colors shadow-2xs"
           />
-          <div className="mt-3 flex items-center gap-1.5 text-xs text-stone-500 flex-wrap">
+          <div className="flex items-center gap-1.5 text-xs text-stone-500 flex-wrap">
             <span className="text-stone-400 font-medium">Quick subjects:</span>
             {sampleIdeas.map((sample) => (
               <button
@@ -117,6 +100,41 @@ export const IdeaStep: React.FC<IdeaStepProps> = ({
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-stone-100">
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-stone-700">Target Audience / Persona</label>
+            <input
+              type="text"
+              value={idea.audience || ''}
+              onChange={(e) => updateIdeaField('audience', e.target.value)}
+              placeholder="e.g. History educators, enthusiasts..."
+              className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-amber-600"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-stone-700">Desired Emotional Mood / Tone</label>
+            <input
+              type="text"
+              value={idea.desiredMood || ''}
+              onChange={(e) => updateIdeaField('desiredMood', e.target.value)}
+              placeholder="e.g. Scholarly, witty, nostalgic..."
+              className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-amber-600"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2 pt-2">
+          <label className="block text-xs font-medium text-stone-700">Specific Symbolism &amp; Thematic Notes</label>
+          <textarea
+            rows={2}
+            value={idea.userNotes || ''}
+            onChange={(e) => updateIdeaField('userNotes', e.target.value)}
+            placeholder="Describe specific thematic elements, historical period context, or distinctive details..."
+            className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-amber-600 font-sans"
+          />
         </div>
       </div>
 
@@ -186,16 +204,6 @@ export const IdeaStep: React.FC<IdeaStepProps> = ({
             })}
           </div>
         </div>
-      </div>
-
-      {/* Full Structured Visual Parameters Selector */}
-      <div className="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-2xs">
-        <StructuredVisualParametersSelector
-          value={project.visualDirection}
-          onChange={handleVisualDirectionChange}
-          creativeDirection={creativeDir}
-          onCreativeDirectionChange={handleCreativeDirectionChange}
-        />
       </div>
 
       {/* AI Action Button with Model Selector */}
