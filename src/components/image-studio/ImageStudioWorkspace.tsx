@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ImageProject, InspirationReference, ReferenceAnalysis } from '../../types';
 import { getImageProjects, saveImageProject } from '../../utils/storage';
 import { getModelConfig } from '../../utils/models';
+import { getApiUrl } from '../../services/apiConfig';
 import { IdeaStep } from './IdeaStep';
 import { ConceptsStep } from './ConceptsStep';
 import { InspirationStep } from './InspirationStep';
@@ -15,13 +16,15 @@ interface ImageStudioWorkspaceProps {
   activeStep: string;
   onSelectStep: (step: string) => void;
   onBackToProjects: () => void;
+  onUpdateProject?: (updated: ImageProject) => void;
 }
 
 export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
   projectId,
   activeStep,
   onSelectStep,
-  onBackToProjects
+  onBackToProjects,
+  onUpdateProject
 }) => {
   const [projects, setProjects] = useState<ImageProject[]>([]);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -36,6 +39,9 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
   const handleUpdateProject = (updated: ImageProject) => {
     saveImageProject(updated);
     setProjects(getImageProjects());
+    if (onUpdateProject) {
+      onUpdateProject(updated);
+    }
   };
 
   const steps = [
@@ -52,7 +58,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
     setIsGenerating(true);
     setErrorMessage(null);
     try {
-      const res = await fetch('/api/image-studio/explore-concepts', {
+      const res = await fetch(getApiUrl('/api/image-studio/explore-concepts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -63,8 +69,9 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Failed to explore concepts');
 
-      const conceptsWithModel = (data.concepts || []).map((c: any) => ({
+      const conceptsWithModel = (data.concepts || []).map((c: any, idx: number) => ({
         ...c,
+        id: c.id || 'concept-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).substring(2, 6),
         modelUsed: data.modelUsed ? getModelConfig(data.modelUsed).displayName : (modelOverride ? getModelConfig(modelOverride).displayName : undefined)
       }));
 
@@ -87,7 +94,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
     setIsGenerating(true);
     setErrorMessage(null);
     try {
-      const res = await fetch('/api/image-studio/analyze-reference', {
+      const res = await fetch(getApiUrl('/api/image-studio/analyze-reference'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -142,7 +149,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
         model: modelOverride
       };
 
-      const res = await fetch('/api/image-studio/create-brief', {
+      const res = await fetch(getApiUrl('/api/image-studio/create-brief'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -185,7 +192,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
         model: modelOverride
       };
 
-      const res = await fetch('/api/image-studio/generate-prompt', {
+      const res = await fetch(getApiUrl('/api/image-studio/generate-prompt'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

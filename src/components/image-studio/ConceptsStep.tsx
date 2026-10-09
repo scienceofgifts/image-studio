@@ -21,10 +21,39 @@ export const ConceptsStep: React.FC<ConceptsStepProps> = ({
   const [selections, setSelections] = useState<Record<string, ConceptRole>>(project.conceptSelections || {});
   const [creativeDirection, setCreativeDirection] = useState<string>(project.creativeDirection || '');
   const [savedConceptIds, setSavedConceptIds] = useState<string[]>(() => {
-    return getSavedConcepts().map(c => c.concept.id);
+    return getSavedConcepts()
+      .map(c => c.concept?.id)
+      .filter((id): id is string => typeof id === 'string' && id !== '');
+  });
+  const [savedConceptNames, setSavedConceptNames] = useState<string[]>(() => {
+    return getSavedConcepts()
+      .map(c => c.concept?.conceptName)
+      .filter((name): name is string => typeof name === 'string' && name !== '');
   });
 
+  React.useEffect(() => {
+    let hasChanges = false;
+    const sanitizedConcepts = project.visualConcepts.map((c, idx) => {
+      if (!c.id) {
+        hasChanges = true;
+        return {
+          ...c,
+          id: 'concept-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).substring(2, 6)
+        };
+      }
+      return c;
+    });
+
+    if (hasChanges) {
+      onUpdateProject({
+        ...project,
+        visualConcepts: sanitizedConcepts
+      });
+    }
+  }, [project.visualConcepts, project.id, onUpdateProject]);
+
   const setRole = (conceptId: string, role: ConceptRole) => {
+    if (!conceptId) return;
     const updated = { ...selections };
     if (role === 'primary') {
       Object.keys(updated).forEach(id => {
@@ -42,20 +71,40 @@ export const ConceptsStep: React.FC<ConceptsStepProps> = ({
 
   const handleToggleSaveConcept = (concept: VisualConcept, e: React.MouseEvent) => {
     e.stopPropagation();
-    const isSaved = savedConceptIds.includes(concept.id);
+    const isSaved = concept.id ? savedConceptIds.includes(concept.id) : false;
+    
     if (isSaved) {
-      removeSavedConcept(concept.id);
-      setSavedConceptIds(savedConceptIds.filter(id => id !== concept.id));
+      if (concept.id) {
+        removeSavedConcept(concept.id);
+        setSavedConceptIds(savedConceptIds.filter(id => id !== concept.id));
+      }
     } else {
+      const generatedId = concept.id || 'concept-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+      
+      // If concept had no ID, update project concepts to persist it
+      if (!concept.id) {
+        concept.id = generatedId;
+        const updatedConcepts = project.visualConcepts.map(c => 
+          c.conceptName === concept.conceptName ? { ...c, id: generatedId } : c
+        );
+        onUpdateProject({
+          ...project,
+          visualConcepts: updatedConcepts
+        });
+      }
+
       saveConceptToGallery({
         id: 'sc-' + Date.now() + Math.random().toString().slice(2, 6),
-        concept,
+        concept: {
+          ...concept,
+          id: generatedId
+        },
         sourceProjectId: project.id,
         sourceProjectTitle: project.title,
         tags: [project.imageIdea.idea, 'Exploration'],
         createdAt: new Date().toISOString()
       });
-      setSavedConceptIds([...savedConceptIds, concept.id]);
+      setSavedConceptIds([...savedConceptIds, generatedId]);
     }
   };
 
@@ -127,7 +176,7 @@ export const ConceptsStep: React.FC<ConceptsStepProps> = ({
           {project.visualConcepts.map((concept, idx) => {
             const role = selections[concept.id] || 'secondary';
             const isPrimary = role === 'primary';
-            const isSaved = savedConceptIds.includes(concept.id);
+            const isSaved = concept.id ? savedConceptIds.includes(concept.id) : false;
 
             return (
               <div

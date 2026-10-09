@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ImageProject, InspirationReference, ReferenceAnalysis, SelectedCharacteristic } from '../../types';
 import { saveInspirationItem, getInspirationLibrary } from '../../utils/storage';
+import { compressImage } from '../../utils/imageCompressor';
 import { Sparkles, Upload, Image as ImageIcon, Plus, Check, Trash2, ArrowRight, Bookmark, BookmarkCheck, AlertCircle } from 'lucide-react';
 
 interface InspirationStepProps {
@@ -24,6 +25,9 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
   const [refImageBase64, setRefImageBase64] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<'success' | 'error'>('success');
+  const [fileInputKey, setFileInputKey] = useState<number>(0);
+  const [analyzingRefId, setAnalyzingRefId] = useState<string | null>(null);
   const [savedLibraryIds, setSavedLibraryIds] = useState<string[]>(() =>
     getInspirationLibrary().map(i => i.id)
   );
@@ -33,7 +37,8 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
     'Typography Reference', 'Illustration', 'Packaging', 'Editorial Graphic', 'Museum Specimen'
   ];
 
-  const showToast = (msg: string) => {
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToastType(type);
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
@@ -45,21 +50,42 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
 
     if (file.size > 10 * 1024 * 1024) {
       setFileError('File size exceeds 10MB limit. Please choose a smaller image.');
+      e.target.value = '';
       return;
     }
+
+    const inputEl = e.target;
 
     const reader = new FileReader();
     reader.onload = (event) => {
       if (event.target?.result) {
-        setRefImageBase64(event.target.result as string);
-        if (!refName) {
-          const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
-          setRefName(nameWithoutExt);
-        }
+        const originalBase64 = event.target.result as string;
+        compressImage(originalBase64, 512, 0.6)
+          .then((compressedBase64) => {
+            setRefImageBase64(compressedBase64);
+            if (!refName) {
+              const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+              setRefName(nameWithoutExt);
+            }
+          })
+          .catch((err) => {
+            console.error('Failed to compress image:', err);
+            setRefImageBase64(originalBase64);
+            if (!refName) {
+              const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+              setRefName(nameWithoutExt);
+            }
+          })
+          .finally(() => {
+            if (inputEl) inputEl.value = '';
+          });
+      } else {
+        if (inputEl) inputEl.value = '';
       }
     };
     reader.onerror = () => {
       setFileError('Failed to read image file. Please try again.');
+      if (inputEl) inputEl.value = '';
     };
     reader.readAsDataURL(file);
   };
@@ -75,21 +101,34 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
       createdAt: new Date().toISOString()
     };
 
-    const updated = [...project.inspirationReferences, newRef];
-    onUpdateProject({
-      ...project,
-      inspirationReferences: updated
-    });
+    try {
+      const currentRefs = project.inspirationReferences || [];
+      const updated = [...currentRefs, newRef];
+      onUpdateProject({
+        ...project,
+        inspirationReferences: updated
+      });
 
-    // Automatically persist to persistent library as well
-    saveInspirationItem(newRef);
-    setSavedLibraryIds([...savedLibraryIds, newRef.id]);
-    showToast(`Added "${newRef.name}" to project and inspiration library!`);
+      // Automatically persist to persistent library as well
+      try {
+        saveInspirationItem(newRef);
+        setSavedLibraryIds([...savedLibraryIds, newRef.id]);
+        showToast(`Added "${newRef.name}" to project and inspiration library!`);
+      } catch (innerErr) {
+        console.warn('Failed to save to global library but project update succeeded:', innerErr);
+        showToast(`Added "${newRef.name}" to project. Global library save failed due to space limits.`, 'error');
+      }
 
-    setRefName('');
-    setRefNotes('');
-    setRefImageBase64(null);
-    setFileError(null);
+      setRefName('');
+      setRefNotes('');
+      setRefImageBase64(null);
+      setFileError(null);
+      setFileInputKey(prev => prev + 1);
+    } catch (err: any) {
+      console.error('Failed to add reference to project:', err);
+      const msg = err?.message || 'Storage Limit Reached! Please delete some old design references or images to make room.';
+      showToast(msg, 'error');
+    }
   };
 
   const handleToggleSaveToGlobalLibrary = (ref: InspirationReference, e: React.MouseEvent) => {
@@ -104,8 +143,10 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
   };
 
   const handleDeleteReference = (id: string) => {
-    const updated = project.inspirationReferences.filter(r => r.id !== id);
-    const updatedCharacteristics = project.selectedReferenceCharacteristics.filter(c => c.referenceId !== id);
+    const currentRefs = project.inspirationReferences || [];
+    const currentCharacteristics = project.selectedReferenceCharacteristics || [];
+    const updated = currentRefs.filter(r => r.id !== id);
+    const updatedCharacteristics = currentCharacteristics.filter(c => c.referenceId !== id);
     onUpdateProject({
       ...project,
       inspirationReferences: updated,
@@ -114,11 +155,12 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
   };
 
   const toggleCharacteristic = (ref: InspirationReference, category: SelectedCharacteristic['category'], text: string) => {
-    const existingIndex = project.selectedReferenceCharacteristics.findIndex(
+    const currentCharacteristics = project.selectedReferenceCharacteristics || [];
+    const existingIndex = currentCharacteristics.findIndex(
       c => c.referenceId === ref.id && c.category === category && c.text === text
     );
 
-    let updated: SelectedCharacteristic[] = [...project.selectedReferenceCharacteristics];
+    let updated: SelectedCharacteristic[] = [...currentCharacteristics];
     if (existingIndex >= 0) {
       updated.splice(existingIndex, 1);
     } else {
@@ -138,15 +180,18 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
   };
 
   const isCharacteristicSelected = (refId: string, category: string, text: string) => {
-    return project.selectedReferenceCharacteristics.some(
+    const currentCharacteristics = project.selectedReferenceCharacteristics || [];
+    return currentCharacteristics.some(
       c => c.referenceId === refId && c.category === category && c.text === text
     );
   };
 
   const runAnalysis = async (ref: InspirationReference) => {
+    setAnalyzingRefId(ref.id);
     try {
       const analysis = await onAnalyzeReference(ref);
-      const updatedRefs = project.inspirationReferences.map(r => 
+      const currentRefs = project.inspirationReferences || [];
+      const updatedRefs = currentRefs.map(r => 
         r.id === ref.id ? { ...r, analysis } : r
       );
       onUpdateProject({
@@ -156,6 +201,9 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
       showToast('Visual analysis completed!');
     } catch (e) {
       console.error('Failed to run analysis:', e);
+      showToast('Failed to analyze reference image. Please try again.', 'error');
+    } finally {
+      setAnalyzingRefId(null);
     }
   };
 
@@ -163,8 +211,16 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
     <div className="max-w-5xl mx-auto space-y-8 py-4">
       {/* Lightweight Toast Feedback */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-stone-900 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-medium flex items-center gap-2 border border-stone-700 animate-bounce">
-          <Check className="w-4 h-4 text-emerald-400" />
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-xl shadow-xl text-xs font-medium flex items-center gap-2 border animate-bounce ${
+          toastType === 'error'
+            ? 'bg-red-950 text-red-200 border-red-800'
+            : 'bg-stone-900 text-white border-stone-700'
+        }`}>
+          {toastType === 'error' ? (
+            <AlertCircle className="w-4 h-4 text-red-400" />
+          ) : (
+            <Check className="w-4 h-4 text-emerald-400" />
+          )}
           <span>{toastMessage}</span>
         </div>
       )}
@@ -229,6 +285,7 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
           <div>
             <label className="block text-xs font-medium text-stone-700 mb-1">Upload Reference Image (PNG/JPG/WebP)</label>
             <input
+              key={fileInputKey}
               type="file"
               accept="image/*"
               onChange={handleFileUpload}
@@ -277,19 +334,88 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
         </div>
       </div>
 
+      {/* Import Saved Reference from Memory / Global Library */}
+      {(() => {
+        const currentRefs = project.inspirationReferences || [];
+        const globalLibrary = getInspirationLibrary();
+        const availableGlobalRefs = globalLibrary.filter(
+          g => !currentRefs.some(r => r.id === g.id)
+        );
+
+        if (availableGlobalRefs.length === 0) return null;
+
+        return (
+          <div className="bg-white border border-stone-200/80 rounded-2xl p-6 space-y-4 shadow-2xs">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-amber-100/80 text-amber-800 rounded-xl border border-amber-200/80 shrink-0">
+                <Bookmark className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-amber-800 font-semibold block mb-0.5">
+                  LIBRARY INTEGRATION
+                </span>
+                <h3 className="text-base font-serif text-stone-900 font-semibold">Import References from Global Memory ({availableGlobalRefs.length})</h3>
+                <p className="text-xs text-stone-600 mt-1 leading-relaxed">
+                  You have visual references saved in memory in your global Inspiration Library. Select any reference to import it and its pre-extracted characteristics directly into this project.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-72 overflow-y-auto pr-1">
+              {availableGlobalRefs.map((ref) => (
+                <div key={ref.id} className="bg-stone-50 border border-stone-200 p-3.5 rounded-xl flex items-center justify-between gap-3 hover:border-amber-400 transition-colors">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {ref.imageDataUrl ? (
+                      <img src={ref.imageDataUrl} alt={ref.name} className="w-12 h-12 object-cover rounded-lg border border-stone-300 shadow-3xs shrink-0" />
+                    ) : (
+                      <div className="w-12 h-12 bg-stone-150 rounded-lg flex items-center justify-center text-stone-400 shrink-0">
+                        <ImageIcon className="w-5 h-5" />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200/80 font-medium">
+                        {ref.type}
+                      </span>
+                      <h4 className="text-xs font-semibold text-stone-900 truncate mt-1">{ref.name}</h4>
+                      {ref.notes && <p className="text-[10px] text-stone-500 truncate italic mt-0.5">{ref.notes}</p>}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = [...currentRefs, ref];
+                      onUpdateProject({
+                        ...project,
+                        inspirationReferences: updated
+                      });
+                      showToast(`Successfully imported "${ref.name}" into project!`);
+                    }}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-stone-900 hover:bg-stone-850 text-white font-medium text-[11px] rounded-lg shadow-3xs transition-colors shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Import</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Reference Library List */}
       <div className="space-y-6">
         <h3 className="text-xs font-semibold text-stone-900 uppercase tracking-wider">
-          Project Visual References ({project.inspirationReferences.length})
+          Project Visual References ({(project.inspirationReferences || []).length})
         </h3>
 
-        {project.inspirationReferences.length === 0 ? (
+        {(project.inspirationReferences || []).length === 0 ? (
           <div className="text-center py-12 bg-white border border-stone-200/80 rounded-2xl text-stone-500 text-xs shadow-2xs">
             No visual references added yet. Use the form above to attach inspiration images or notes.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {project.inspirationReferences.map((ref) => {
+            {(project.inspirationReferences || []).map((ref) => {
               const hasAnalysis = !!ref.analysis;
               const isSavedInLibrary = savedLibraryIds.includes(ref.id);
 
@@ -344,11 +470,19 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
                     <button
                       type="button"
                       onClick={() => runAnalysis(ref)}
-                      disabled={isAnalyzing}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-100 hover:bg-amber-200/80 text-amber-900 rounded-lg border border-amber-300 transition-colors"
+                      disabled={isAnalyzing || analyzingRefId !== null}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                        analyzingRefId === ref.id
+                          ? 'bg-amber-50 text-amber-700/60 border-amber-200 cursor-not-allowed'
+                          : 'bg-amber-100 hover:bg-amber-200/80 text-amber-900 border-amber-300'
+                      }`}
                     >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>{hasAnalysis ? 'Re-Analyze Reference' : 'Analyze Reference'}</span>
+                      {analyzingRefId === ref.id ? (
+                        <div className="w-3.5 h-3.5 border-2 border-amber-900/30 border-t-amber-900 rounded-full animate-spin mr-0.5" />
+                      ) : (
+                        <Sparkles className="w-3.5 h-3.5" />
+                      )}
+                      <span>{analyzingRefId === ref.id ? 'Analyzing...' : (hasAnalysis ? 'Re-Analyze Reference' : 'Analyze Reference')}</span>
                     </button>
 
                     {hasAnalysis && (
@@ -367,6 +501,8 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
 
                       <div className="space-y-1.5">
                         {Object.entries(ref.analysis).map(([catKey, value]) => {
+                          if (typeof value !== 'string' || catKey === 'modelUsed') return null;
+
                           const categoryName = catKey
                             .replace(/([A-Z])/g, ' $1')
                             .replace(/^./, str => str.toUpperCase());
@@ -404,15 +540,15 @@ export const InspirationStep: React.FC<InspirationStepProps> = ({
       {/* Selected Characteristics Carry Forward Summary */}
       <div className="bg-white border border-stone-200/80 rounded-2xl p-5 space-y-3 shadow-2xs">
         <h4 className="text-xs font-semibold text-stone-900 uppercase tracking-wider">
-          Selected Characteristics Carried Forward ({project.selectedReferenceCharacteristics.length})
+          Selected Characteristics Carried Forward ({(project.selectedReferenceCharacteristics || []).length})
         </h4>
-        {project.selectedReferenceCharacteristics.length === 0 ? (
+        {(project.selectedReferenceCharacteristics || []).length === 0 ? (
           <p className="text-xs text-stone-500">
             No characteristics selected yet. Analyze a reference above and click any characteristic chip to carry it forward into your Design Brief.
           </p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {project.selectedReferenceCharacteristics.map((char) => (
+            {(project.selectedReferenceCharacteristics || []).map((char) => (
               <span
                 key={char.id}
                 className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 border border-amber-300 text-amber-950 text-xs rounded-xl font-medium"

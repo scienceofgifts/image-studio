@@ -217,9 +217,99 @@ export function saveImageProject(project: ImageProject): void {
     } else {
       projects.unshift(updatedProject);
     }
-    localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(projects));
+    
+    try {
+      localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(projects));
+    } catch (setItemError) {
+      if (
+        setItemError instanceof Error &&
+        (setItemError.name === 'QuotaExceededError' ||
+         setItemError.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+         setItemError.message.toLowerCase().includes('quota') ||
+         setItemError.message.toLowerCase().includes('limit'))
+      ) {
+        console.warn('LocalStorage quota exceeded. Progressively pruning oldest project image reference data URLs...');
+        let saved = false;
+
+        // Loop through projects from oldest to newest
+        for (let pIndex = projects.length - 1; pIndex >= 0; pIndex--) {
+          const proj = projects[pIndex];
+          if (proj.id === project.id) {
+            continue; // Do not prune reference images of the project currently being edited and saved
+          }
+          if (proj.inspirationReferences) {
+            // Find references with images in this project and prune them
+            let prunedAny = false;
+            for (let refIndex = proj.inspirationReferences.length - 1; refIndex >= 0; refIndex--) {
+              const ref = proj.inspirationReferences[refIndex];
+              if (ref.imageDataUrl) {
+                console.log(`Pruning reference image data for project "${proj.title}" / ref "${ref.name}"`);
+                ref.imageDataUrl = undefined;
+                prunedAny = true;
+              }
+            }
+
+            if (prunedAny) {
+              try {
+                localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(projects));
+                saved = true;
+                console.log('Successfully saved image projects after pruning old reference image.');
+                break;
+              } catch (innerError) {
+                // Keep pruning other projects/references
+              }
+            }
+          }
+        }
+
+        if (!saved) {
+          // If still failing, try pruning old images from the global inspiration library!
+          console.warn('Pruning project images did not suffice. Progressively pruning oldest global inspiration library images...');
+          try {
+            const library = getInspirationLibrary();
+            for (let i = library.length - 1; i >= 0; i--) {
+              if (library[i].imageDataUrl) {
+                console.log(`Pruning global library image content to save space: ${library[i].name}`);
+                library[i].imageDataUrl = undefined;
+                try {
+                  localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(library));
+                  localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(projects));
+                  saved = true;
+                  console.log('Successfully saved image projects after pruning global library images.');
+                  break;
+                } catch (e) {
+                  // Continue pruning if it still fails
+                }
+              }
+            }
+          } catch (libError) {
+            console.error('Failed to prune global library images:', libError);
+          }
+        }
+
+        if (!saved) {
+          // If still failing, try deleting the oldest 2 projects completely
+          console.warn('Individual image pruning inside projects did not suffice. Deleting oldest projects...');
+          const prunedProjects = projects.slice(0, Math.max(1, projects.length - 2));
+          try {
+            localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(prunedProjects));
+            console.log('Saved image projects after deleting oldest projects.');
+            saved = true;
+          } catch (extremeError) {
+            console.error('Failed to save image projects even after extensive pruning:', extremeError);
+          }
+        }
+
+        if (!saved) {
+          throw new Error('Local Storage Full: Image references exceeded the 5MB browser quota. Please manually delete some old design references or projects to free up space.');
+        }
+      } else {
+        throw setItemError;
+      }
+    }
   } catch (e) {
     console.error('Failed to save image project:', e);
+    throw e;
   }
 }
 
@@ -252,7 +342,11 @@ export function getSavedConcepts(): SavedConceptItem[] {
 export function saveConceptToGallery(item: SavedConceptItem): void {
   try {
     const concepts = getSavedConcepts();
-    const index = concepts.findIndex(c => c.id === item.id || c.concept.id === item.concept.id);
+    const index = concepts.findIndex(c => 
+      (item.id && c.id === item.id) || 
+      (item.concept?.id && c.concept?.id && c.concept.id === item.concept.id) ||
+      (item.concept?.conceptName && c.concept?.conceptName && c.concept.conceptName === item.concept.conceptName)
+    );
     if (index >= 0) {
       concepts[index] = item;
     } else {
@@ -261,15 +355,21 @@ export function saveConceptToGallery(item: SavedConceptItem): void {
     localStorage.setItem(STORAGE_KEYS.SAVED_CONCEPTS, JSON.stringify(concepts));
   } catch (e) {
     console.error('Failed to save concept:', e);
+    throw e;
   }
 }
 
-export function removeSavedConcept(id: string): void {
+export function removeSavedConcept(id: string, name?: string): void {
   try {
-    const concepts = getSavedConcepts().filter(c => c.id !== id && c.concept.id !== id);
+    const concepts = getSavedConcepts().filter(c => {
+      const matchId = id && (c.id === id || c.concept?.id === id);
+      const matchName = name && c.concept?.conceptName === name;
+      return !matchId && !matchName;
+    });
     localStorage.setItem(STORAGE_KEYS.SAVED_CONCEPTS, JSON.stringify(concepts));
   } catch (e) {
     console.error('Failed to remove saved concept:', e);
+    throw e;
   }
 }
 
@@ -299,9 +399,60 @@ export function saveInspirationItem(item: InspirationReference): void {
     } else {
       library.unshift(item);
     }
-    localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(library));
+    
+    try {
+      localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(library));
+    } catch (setItemError) {
+      // Check if it's a quota exceeded error
+      if (
+        setItemError instanceof Error &&
+        (setItemError.name === 'QuotaExceededError' ||
+         setItemError.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+         setItemError.message.toLowerCase().includes('quota') ||
+         setItemError.message.toLowerCase().includes('limit'))
+      ) {
+        console.warn('LocalStorage quota exceeded. Progressively pruning oldest inspiration image data URLs...');
+        let saved = false;
+        
+        // Loop from oldest to newest, clearing imageDataUrl to reclaim space
+        for (let i = library.length - 1; i >= 0; i--) {
+          if (library[i].id === item.id) {
+            continue; // Do not prune the reference currently being saved
+          }
+          if (library[i].imageDataUrl) {
+            console.log(`Pruning image content for older reference to save space: ${library[i].name}`);
+            library[i].imageDataUrl = undefined;
+            
+            try {
+              localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(library));
+              saved = true;
+              console.log('Successfully saved inspiration library after pruning old image.');
+              break;
+            } catch (innerError) {
+              // Continue pruning if it still fails
+            }
+          }
+        }
+        
+        if (!saved) {
+          // If still fails, try deleting the 3 oldest items entirely
+          console.warn('Pruning individual images did not suffice. Deleting oldest references entirely...');
+          const prunedLibrary = library.slice(0, Math.max(3, library.length - 3));
+          try {
+            localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(prunedLibrary));
+            console.log('Saved inspiration library after pruning oldest references.');
+          } catch (extremeError) {
+            console.error('Failed to save inspiration library even after extensive pruning:', extremeError);
+            throw extremeError;
+          }
+        }
+      } else {
+        throw setItemError;
+      }
+    }
   } catch (e) {
     console.error('Failed to save inspiration item:', e);
+    throw e;
   }
 }
 

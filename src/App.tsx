@@ -12,6 +12,7 @@ import { NewProjectModal } from './components/common/NewProjectModal';
 import { FolderKanban, Plus, Sparkles, LayoutGrid, Image as ImageIcon, Sliders, ArrowRight } from 'lucide-react';
 
 import { handleGlobalEscapeKey, useOverlay } from './utils/overlayManager';
+import { getApiUrl } from './services/apiConfig';
 
 export default function App() {
   const [activeView, setActiveView] = useState<MainView>('projects');
@@ -140,7 +141,7 @@ export default function App() {
 
   // AI API wrapper for inspiration analysis in Gallery
   const handleAnalyzeReferenceGlobal = async (ref: InspirationReference) => {
-    const res = await fetch('/api/image-studio/analyze-reference', {
+    const res = await fetch(getApiUrl('/api/image-studio/analyze-reference'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -247,7 +248,11 @@ export default function App() {
           projectId={activeProjectId}
           activeStep={activeStep}
           onSelectStep={setActiveStep}
-          onBackToProjects={() => setActiveView('projects')}
+          onBackToProjects={() => {
+            refreshData();
+            setActiveView('projects');
+          }}
+          onUpdateProject={refreshData}
         />
       )}
 

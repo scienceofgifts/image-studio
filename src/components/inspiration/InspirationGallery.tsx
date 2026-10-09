@@ -6,11 +6,15 @@ import {
   deleteInspirationItem, 
   toggleInspirationVisualProfile,
   saveSynthesisConcept,
-  saveConceptToGallery
+  saveConceptToGallery,
+  getSavedConcepts,
+  getSynthesisConcepts
 } from '../../utils/storage';
 import { ModelSelector } from '../common/ModelSelector';
 import { getGlobalDefaultModel, getModelConfig } from '../../utils/models';
 import { useOverlay } from '../../utils/overlayManager';
+import { getApiUrl } from '../../services/apiConfig';
+import { compressImage } from '../../utils/imageCompressor';
 import { 
   Image as ImageIcon, 
   Plus, 
@@ -96,8 +100,20 @@ export const InspirationGallery: React.FC<InspirationGalleryProps> = ({
   const [isSynthesizing, setIsSynthesizing] = useState<boolean>(false);
 
   // Saved concept trackers
-  const [savedExploreConceptTitles, setSavedExploreConceptTitles] = useState<Set<string>>(new Set());
-  const [savedSynthesisConceptIds, setSavedSynthesisConceptIds] = useState<Set<string>>(new Set());
+  const [savedExploreConceptTitles, setSavedExploreConceptTitles] = useState<Set<string>>(() => {
+    return new Set(
+      getSavedConcepts()
+        .map(c => c.concept?.conceptName)
+        .filter((title): title is string => typeof title === 'string' && title !== '')
+    );
+  });
+  const [savedSynthesisConceptIds, setSavedSynthesisConceptIds] = useState<Set<string>>(() => {
+    return new Set(
+      getSynthesisConcepts()
+        .map(s => s.id || s.conceptTitle)
+        .filter((id): id is string => typeof id === 'string' && id !== '')
+    );
+  });
 
   // New Reference Form State
   const [newName, setNewName] = useState('');
@@ -107,10 +123,14 @@ export const InspirationGallery: React.FC<InspirationGalleryProps> = ({
   const [newImageBase64, setNewImageBase64] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<'success' | 'error'>('success');
+  const [fileInputKey, setFileInputKey] = useState<number>(0);
+  const [analyzingRefId, setAnalyzingRefId] = useState<string | null>(null);
 
   const collections = ['All', 'Museum Graphics', 'Vintage Typography', 'T-Shirt References', 'Mug Designs', 'Engraving & Woodcut', 'Scientific Illustration', 'Minimalist'];
 
-  const showToast = (msg: string) => {
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToastType(type);
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
@@ -128,21 +148,42 @@ export const InspirationGallery: React.FC<InspirationGalleryProps> = ({
 
     if (file.size > 10 * 1024 * 1024) {
       setFileError('File size exceeds 10MB limit. Please select a smaller image file.');
+      e.target.value = '';
       return;
     }
+
+    const inputEl = e.target;
 
     const reader = new FileReader();
     reader.onload = (event) => {
       if (event.target?.result) {
-        setNewImageBase64(event.target.result as string);
-        if (!newName) {
-          const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
-          setNewName(nameWithoutExt);
-        }
+        const originalBase64 = event.target.result as string;
+        compressImage(originalBase64, 512, 0.6)
+          .then((compressedBase64) => {
+            setNewImageBase64(compressedBase64);
+            if (!newName) {
+              const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+              setNewName(nameWithoutExt);
+            }
+          })
+          .catch((err) => {
+            console.error('Failed to compress image:', err);
+            setNewImageBase64(originalBase64);
+            if (!newName) {
+              const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+              setNewName(nameWithoutExt);
+            }
+          })
+          .finally(() => {
+            if (inputEl) inputEl.value = '';
+          });
+      } else {
+        if (inputEl) inputEl.value = '';
       }
     };
     reader.onerror = () => {
       setFileError('Failed to upload image file.');
+      if (inputEl) inputEl.value = '';
     };
     reader.readAsDataURL(file);
   };
@@ -158,14 +199,20 @@ export const InspirationGallery: React.FC<InspirationGalleryProps> = ({
       imageDataUrl: newImageBase64 || undefined,
       createdAt: new Date().toISOString()
     };
-    saveInspirationItem(item);
-    refreshLocalLibrary();
-    showToast(`Saved "${item.name}" to Inspiration Library!`);
+    try {
+      saveInspirationItem(item);
+      refreshLocalLibrary();
+      showToast(`Saved "${item.name}" to Inspiration Library!`);
 
-    setNewName('');
-    setNewNotes('');
-    setNewImageBase64(null);
-    setFileError(null);
+      setNewName('');
+      setNewNotes('');
+      setNewImageBase64(null);
+      setFileError(null);
+      setFileInputKey(prev => prev + 1);
+    } catch (err) {
+      console.error('Failed to save inspiration:', err);
+      showToast('Storage Limit Reached. Please remove some older references or images to make room.', 'error');
+    }
   };
 
   const handleDeleteItem = (id: string, e: React.MouseEvent) => {
@@ -214,6 +261,7 @@ export const InspirationGallery: React.FC<InspirationGalleryProps> = ({
   const [analysisTaskModel, setAnalysisTaskModel] = useState<string>(getGlobalDefaultModel());
 
   const handleAnalyzeModalRef = async (ref: InspirationReference) => {
+    setAnalyzingRefId(ref.id);
     try {
       const analysis = await onAnalyzeReference(ref, analysisTaskModel);
       const updatedRef = { ...ref, analysis: { ...analysis, modelUsed: analysis.modelUsed || getModelConfig(analysisTaskModel).displayName } };
@@ -223,7 +271,9 @@ export const InspirationGallery: React.FC<InspirationGalleryProps> = ({
       showToast(`Visual analysis completed with ${getModelConfig(analysisTaskModel).shortName}!`);
     } catch (e) {
       console.error('Analysis failed:', e);
-      showToast('Failed to analyze reference.');
+      showToast('Failed to analyze reference image. Please try again.', 'error');
+    } finally {
+      setAnalyzingRefId(null);
     }
   };
 
@@ -234,15 +284,16 @@ export const InspirationGallery: React.FC<InspirationGalleryProps> = ({
     setExploreConcepts([]);
 
     try {
-      const res = await fetch('/api/image-studio/explore-inspiration', {
+      const res = await fetch(getApiUrl('/api/image-studio/explore-inspiration'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ inspiration: exploringRef, topic: exploreTopic.trim(), model: exploreTaskModel })
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.concepts)) {
-        const conceptsWithModel = data.concepts.map((c: any) => ({
+        const conceptsWithModel = data.concepts.map((c: any, idx: number) => ({
           ...c,
+          id: c.id || 'exp-concept-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).substring(2, 6),
           modelUsed: data.modelUsed ? getModelConfig(data.modelUsed).displayName : getModelConfig(exploreTaskModel).displayName
         }));
         setExploreConcepts(conceptsWithModel);
@@ -266,15 +317,16 @@ export const InspirationGallery: React.FC<InspirationGalleryProps> = ({
     const selectedRefs = library.filter(item => selectedIds.has(item.id));
 
     try {
-      const res = await fetch('/api/image-studio/synthesize-inspirations', {
+      const res = await fetch(getApiUrl('/api/image-studio/synthesize-inspirations'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ inspirations: selectedRefs, topic: synthesisTopic.trim(), model: synthesisTaskModel })
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.concepts)) {
-        const conceptsWithModel = data.concepts.map((c: any) => ({
+        const conceptsWithModel = data.concepts.map((c: any, idx: number) => ({
           ...c,
+          id: c.id || 'syn-concept-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).substring(2, 6),
           modelUsed: data.modelUsed ? getModelConfig(data.modelUsed).displayName : getModelConfig(synthesisTaskModel).displayName
         }));
         setSynthesisConcepts(conceptsWithModel);
@@ -325,10 +377,18 @@ export const InspirationGallery: React.FC<InspirationGalleryProps> = ({
 
   // Save Synthesis Concept
   const handleSaveSynthesisConcept = (concept: SynthesisConcept) => {
-    saveSynthesisConcept(concept);
-    const key = concept.id || concept.conceptTitle;
-    setSavedSynthesisConceptIds(prev => new Set(prev).add(key));
-    showToast(`Saved concept "${concept.conceptTitle}"!`);
+    const conceptWithId = {
+      ...concept,
+      id: concept.id || 'syn-concept-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6)
+    };
+    saveSynthesisConcept(conceptWithId);
+    const key = conceptWithId.id || conceptWithId.conceptTitle;
+    setSavedSynthesisConceptIds(prev => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+    showToast(`Saved concept "${conceptWithId.conceptTitle}"!`);
     onRefreshData();
   };
 
@@ -357,8 +417,16 @@ export const InspirationGallery: React.FC<InspirationGalleryProps> = ({
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 relative">
       {/* Toast Feedback */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-stone-900 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-medium flex items-center gap-2 border border-stone-700 animate-bounce">
-          <Check className="w-4 h-4 text-emerald-400" />
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-xl shadow-xl text-xs font-medium flex items-center gap-2 border animate-bounce ${
+          toastType === 'error'
+            ? 'bg-red-950 text-red-200 border-red-800'
+            : 'bg-stone-900 text-white border-stone-700'
+        }`}>
+          {toastType === 'error' ? (
+            <AlertCircle className="w-4 h-4 text-red-400" />
+          ) : (
+            <Check className="w-4 h-4 text-emerald-400" />
+          )}
           <span>{toastMessage}</span>
         </div>
       )}
@@ -476,6 +544,7 @@ export const InspirationGallery: React.FC<InspirationGalleryProps> = ({
           <div>
             <label className="block text-stone-700 font-medium mb-1">Upload Reference Image</label>
             <input
+              key={fileInputKey}
               type="file"
               accept="image/*"
               onChange={handleFileUpload}
@@ -803,16 +872,54 @@ export const InspirationGallery: React.FC<InspirationGalleryProps> = ({
                       </div>
                     </div>
                   </div>
+                  
+                  {/* Re-Analyze Action Button */}
+                  <div className="pt-4 border-t border-stone-150 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-stone-500 font-semibold uppercase tracking-wider font-mono">Model:</span>
+                      <ModelSelector
+                        selectedModel={analysisTaskModel}
+                        onChangeModel={setAnalysisTaskModel}
+                        compact
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAnalyzeModalRef(selectedModalRef)}
+                      disabled={isAnalyzing || analyzingRefId !== null}
+                      className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition-all shadow-3xs ${
+                        analyzingRefId === selectedModalRef.id
+                          ? 'bg-amber-50 text-amber-700/50 border-amber-200 cursor-not-allowed'
+                          : 'bg-stone-100 hover:bg-stone-200 text-stone-700 border-stone-300'
+                      }`}
+                    >
+                      {analyzingRefId === selectedModalRef.id ? (
+                        <div className="w-3 h-3 border-2 border-stone-900/30 border-t-stone-900 rounded-full animate-spin mr-0.5" />
+                      ) : (
+                        <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                      )}
+                      <span>{analyzingRefId === selectedModalRef.id ? 'Re-Analyzing...' : 'Re-Analyze Reference'}</span>
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="text-center py-8 space-y-3 bg-stone-50 p-6 rounded-2xl border border-stone-200">
                   <p className="text-stone-600">Reference has not been analyzed yet.</p>
                   <button
                     onClick={() => handleAnalyzeModalRef(selectedModalRef)}
-                    disabled={isAnalyzing}
-                    className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white font-medium text-xs rounded-xl"
+                    disabled={isAnalyzing || analyzingRefId !== null}
+                    className={`flex items-center gap-1.5 px-4 py-2 text-white font-medium text-xs rounded-xl transition-all ${
+                      (isAnalyzing || analyzingRefId !== null)
+                        ? 'bg-stone-400 cursor-not-allowed shadow-none'
+                        : 'bg-stone-900 hover:bg-stone-800 shadow-2xs'
+                    }`}
                   >
-                    {isAnalyzing ? 'Extracting Visual Knowledge...' : 'Run AI Visual Analysis'}
+                    {(isAnalyzing || analyzingRefId !== null) ? (
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin mr-0.5" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5" />
+                    )}
+                    <span>{(isAnalyzing || analyzingRefId !== null) ? 'Extracting Visual Knowledge...' : 'Run AI Visual Analysis'}</span>
                   </button>
                 </div>
               )}

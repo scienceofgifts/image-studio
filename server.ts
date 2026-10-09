@@ -36,9 +36,13 @@ function cleanJsonString(str: string): string {
   return cleaned.trim();
 }
 
-// ----------------------------------------------------
-// IMAGE STUDIO ENDPOINTS
-// ----------------------------------------------------
+// Health endpoints
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', service: 'image-studio-api' });
+});
+app.get('/api/image-studio/health', (req, res) => {
+  res.json({ status: 'ok', service: 'image-studio-api' });
+});
 
 const PRIMARY_MODEL = 'gemini-3.5-flash';
 const FALLBACK_MODELS = [
