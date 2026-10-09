@@ -793,13 +793,13 @@ app.post('/api/image-studio/generate-prompt', async (req, res) => {
 
     const promptText = `
 You are the master Image Prompt Translator for Science of Gifts.
-Your task is to translate an approved, structured DESIGN BRIEF into a pristine, highly effective image-generation prompt for advanced AI models (such as Google Flow, Gemini, ChatGPT, Midjourney, FLUX).
+Your task is to translate the approved, structured DESIGN BRIEF into a precise, highly effective image-generation prompt for advanced AI models (such as Google Flow, Gemini, ChatGPT, Midjourney, FLUX).
 
 APPROVED DESIGN BRIEF:
 ${JSON.stringify(designBrief || {}, null, 2)}
 
 USER PROMPT INSTRUCTIONS:
-"${promptInstructions || 'Write a precise image-generation prompt that translates the approved design brief into concrete visual instructions. Prioritize composition, hierarchy, typography, illustration, and production requirements over decorative adjectives. Preserve the approved creative direction. Do not introduce new concepts that were not approved.'}"
+"${promptInstructions || 'Translate the approved design brief into a precise image-generation prompt. Strictly describe the actual subject, composition, visual hierarchy, typography, illustration style, color palette, and production requirements. Never substitute the user concept with generic stock scenes.'}"
 
 REUSABLE VISUAL PREFERENCES / CHARACTERISTICS:
 ${JSON.stringify(visualCharacteristics || {})}
@@ -808,13 +808,12 @@ OUTPUT MODE: ${outputMode || 'Finished Artwork'}
 INTENDED OUTPUT: ${intendedOutput || 'Standalone Graphic Artwork'}
 USER CREATIVE DIRECTION: "${creativeDirection || ''}"
 
-RULES FOR PROMPT GENERATION:
-1. Translate the design brief decisions into concrete, evocative visual instructions.
-2. Synthesize selected visual parameters (composition, hierarchy, typography, art technique, color swatches, era, mood) into coherent, elegant visual descriptions rather than robotic keyword lists.
-3. Absolutely BAN generic AI hype words like "stunning", "beautiful", "masterpiece", "breathtaking", "highly detailed", "cinematic", "photorealistic", "award-winning" unless genuinely required as an exact art style term.
-4. If outputMode is "Finished Artwork" or intended output is artwork/t-shirt/poster/mug graphic:
-   Explicitly instruct the model to render flat, isolated finished artwork on a clean/neutral or transparent-style background, with NO physical product mockup, NO person wearing a shirt, NO staged photo background, and NO frame borders around the canvas unless part of the artwork.
-5. Provide a separate "negativePrompt" string listing things to exclude.
+STRICT RULES FOR PROMPT GENERATION:
+1. ACCURACY & FIDELITY: You MUST faithfully depict the user's actual subject and design brief details (e.g., history teacher museum specimen, Viking mythology, botanical catalog, etc.). NEVER substitute the user's concept with a generic gift box, luxury packaging, or unrelated stock scene.
+2. CONCRETE VISUAL DESCRIPTIONS: Translate the design brief decisions into concrete, evocative visual instructions (composition, hierarchy, typography, art technique, color swatches, era, mood).
+3. NO GENERIC FILLER: Absolutely BAN generic stock AI filler words and phrases such as "8k resolution", "masterpiece", "hyper-realistic", "stunning", "beautiful", "breathtaking", "highly detailed", "cinematic", "photorealistic", "award-winning", "luxury gift box", "satin ribbon", "studio lighting", "soft pastel background" unless explicitly required by the design brief.
+4. ISOLATED ARTWORK FORMAT: If outputMode is "Finished Artwork" or intended output is artwork/t-shirt/poster/mug graphic, explicitly instruct the model to render flat, isolated finished artwork on a clean/neutral or transparent-style background, with NO physical product mockup, NO person wearing a shirt, NO staged photo background, and NO frame borders around the canvas unless part of the artwork.
+5. NEGATIVE PROMPT: Provide a separate "negativePrompt" string explicitly excluding generic stock photography, mockups, and filler.
 
 Return JSON in the specified schema.
 `;
@@ -955,7 +954,7 @@ function generateFallbackPrompt(reqBody: any) {
 
   return {
     finalPrompt: promptParts,
-    negativePrompt: 'blurry, distorted, low quality, 3D render, glossy neon, physical t-shirt mockup, model wearing shirt, photographic realistic clutter, watermarks, bad anatomy',
+    negativePrompt: 'blurry, distorted, low quality, 3D render, glossy neon, physical t-shirt mockup, model wearing shirt, photographic realistic clutter, luxury gift box, satin ribbon, 8k resolution, masterpiece, watermarks, bad anatomy',
     modelNotes: 'Works best in Midjourney v6 (--v 6.0), Google Flow, or Gemini image generation models. Set aspect ratio as needed (--ar 1:1 or --ar 4:5).'
   };
 }

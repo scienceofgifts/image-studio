@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ImageProject, InspirationReference, ReferenceAnalysis } from '../../types';
-import { getImageProjects, saveImageProject } from '../../utils/storage';
+import { getImageProjects, saveImageProject, safeStringify } from '../../utils/storage';
 import { getModelConfig } from '../../utils/models';
 import { getApiUrl } from '../../services/apiConfig';
 import { IdeaStep } from './IdeaStep';
@@ -61,7 +61,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
       const res = await fetch(getApiUrl('/api/image-studio/explore-concepts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: safeStringify({
           ...activeProject.imageIdea,
           model: modelOverride
         })
@@ -97,7 +97,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
       const res = await fetch(getApiUrl('/api/image-studio/analyze-reference'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: safeStringify({
           referenceName: ref.name,
           referenceType: ref.type,
           notes: ref.notes,
@@ -152,7 +152,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
       const res = await fetch(getApiUrl('/api/image-studio/create-brief'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: safeStringify(payload)
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Failed to create brief');
@@ -195,7 +195,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
       const res = await fetch(getApiUrl('/api/image-studio/generate-prompt'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: safeStringify(payload)
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Failed to generate prompt');
@@ -217,6 +217,39 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      const target = e.target as HTMLElement;
+      if (target && target.tagName === 'TEXTAREA') {
+        return;
+      }
+      if (isGenerating) return;
+
+      if (activeStep === 'idea') {
+        if (activeProject.imageIdea?.idea?.trim()) {
+          e.preventDefault();
+          handleExploreConcepts();
+        }
+      } else if (activeStep === 'concepts') {
+        e.preventDefault();
+        onSelectStep('inspiration');
+      } else if (activeStep === 'inspiration') {
+        e.preventDefault();
+        onSelectStep('direction');
+      } else if (activeStep === 'direction') {
+        e.preventDefault();
+        onSelectStep('brief');
+      } else if (activeStep === 'brief') {
+        e.preventDefault();
+        if (activeProject.designBrief) {
+          onSelectStep('prompt');
+        } else {
+          handleCreateBrief();
+        }
+      }
+    }
+  };
+
   if (!activeProject) {
     return (
       <div className="p-8 text-center text-stone-500">Loading project...</div>
@@ -224,7 +257,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
   }
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-[#faf9f6] text-stone-900 flex flex-col">
+    <div className="min-h-[calc(100vh-4rem)] bg-[#faf9f6] text-stone-900 flex flex-col" onKeyDown={handleKeyDown}>
       {/* Project Overview Header */}
       <div className="bg-white border-b border-stone-200/80 px-4 sm:px-6 lg:px-8 py-4 shadow-2xs">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">

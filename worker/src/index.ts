@@ -392,7 +392,7 @@ function generateFallbackPrompt(reqBody: any) {
 
   return {
     finalPrompt: promptParts,
-    negativePrompt: 'blurry, distorted, low quality, 3D render, glossy neon, physical t-shirt mockup, model wearing shirt, photographic realistic clutter, watermarks, bad anatomy',
+    negativePrompt: 'blurry, distorted, low quality, 3D render, glossy neon, physical t-shirt mockup, model wearing shirt, photographic realistic clutter, luxury gift box, satin ribbon, 8k resolution, masterpiece, watermarks, bad anatomy',
     modelNotes: 'Works best in Midjourney v6 (--v 6.0), Google Flow, or Gemini image generation models. Set aspect ratio as needed (--ar 1:1 or --ar 4:5).'
   };
 }
@@ -800,8 +800,29 @@ Synthesize design decisions into a single, authoritative DESIGN BRIEF in JSON.
 
         const promptText = `
 You are the master Image Prompt Translator for Science of Gifts.
-Translate an approved DESIGN BRIEF into a pristine image-generation prompt package.
-Return JSON schema with finalPrompt, negativePrompt, modelNotes.
+Your task is to translate the approved, structured DESIGN BRIEF into a precise, highly effective image-generation prompt for advanced AI models (such as Google Flow, Gemini, ChatGPT, Midjourney, FLUX).
+
+APPROVED DESIGN BRIEF:
+${JSON.stringify(designBrief || {}, null, 2)}
+
+USER PROMPT INSTRUCTIONS:
+"${promptInstructions || 'Translate the approved design brief into a precise image-generation prompt. Strictly describe the actual subject, composition, visual hierarchy, typography, illustration style, color palette, and production requirements. Never substitute the user concept with generic stock scenes.'}"
+
+REUSABLE VISUAL PREFERENCES / CHARACTERISTICS:
+${JSON.stringify(visualCharacteristics || {})}
+
+OUTPUT MODE: ${outputMode || 'Finished Artwork'}
+INTENDED OUTPUT: ${intendedOutput || 'Standalone Graphic Artwork'}
+USER CREATIVE DIRECTION: "${creativeDirection || ''}"
+
+STRICT RULES FOR PROMPT GENERATION:
+1. ACCURACY & FIDELITY: You MUST faithfully depict the user's actual subject and design brief details. NEVER substitute the user's concept with a generic gift box, luxury packaging, or unrelated stock scene.
+2. CONCRETE VISUAL DESCRIPTIONS: Translate the design brief decisions into concrete, evocative visual instructions (composition, hierarchy, typography, art technique, color swatches, era, mood).
+3. NO GENERIC FILLER: Absolutely BAN generic stock AI filler words and phrases such as "8k resolution", "masterpiece", "hyper-realistic", "stunning", "beautiful", "breathtaking", "highly detailed", "cinematic", "photorealistic", "award-winning", "luxury gift box", "satin ribbon", "studio lighting", "soft pastel background" unless explicitly required by the design brief.
+4. ISOLATED ARTWORK FORMAT: If outputMode is "Finished Artwork" or intended output is artwork/t-shirt/poster/mug graphic, explicitly instruct the model to render flat, isolated finished artwork on a clean/neutral or transparent-style background, with NO physical product mockup, NO person wearing a shirt, NO staged photo background, and NO frame borders around the canvas unless part of the artwork.
+5. NEGATIVE PROMPT: Provide a separate "negativePrompt" string explicitly excluding generic stock photography, mockups, and filler.
+
+Return JSON in the specified schema.
 `;
 
         try {
@@ -823,9 +844,10 @@ Return JSON schema with finalPrompt, negativePrompt, modelNotes.
           }));
 
           const result = JSON.parse(cleanJsonString(resObj.text));
+          console.log(`[Worker Image Studio] Prompt generated successfully via model: ${resObj.modelUsed}`);
           return jsonResponse({ success: true, ...result, modelUsed: resObj.modelUsed }, 200, corsHeaders);
         } catch (apiError: any) {
-          console.warn(`Gemini API error; using fallback prompt generator:`, apiError?.message);
+          console.warn(`[Worker Image Studio] Gemini API error; using fallback prompt generator. Model requested: ${model || 'default'}. Error:`, apiError?.message);
           const fallbackResult = generateFallbackPrompt(reqBody);
           return jsonResponse({
             success: true,
@@ -836,6 +858,7 @@ Return JSON schema with finalPrompt, negativePrompt, modelNotes.
           }, 200, corsHeaders);
         }
       } catch (err: any) {
+        console.error('[Worker Image Studio] Error in generate-prompt endpoint:', err?.message);
         return jsonResponse({ success: false, error: err?.message || 'Failed to generate final prompt' }, 500, corsHeaders);
       }
     }

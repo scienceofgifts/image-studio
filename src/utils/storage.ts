@@ -1,7 +1,7 @@
 import { ImageProject, SavedConceptItem, InspirationReference, VisualProfile, SynthesisConcept } from '../types';
 
 export const DEFAULT_PROMPT_INSTRUCTIONS = 
-  "Write a precise image-generation prompt that translates the approved design brief into concrete visual instructions. Prioritize composition, hierarchy, typography, illustration, and production requirements over decorative adjectives. Preserve the approved creative direction. Do not introduce new concepts that were not approved.";
+  "Translate the approved design brief into a precise, concrete image-generation prompt. Strictly describe the actual subject, composition, visual hierarchy, typography, illustration style, color palette, and production requirements specified in the brief. Never substitute the user's specific subject with generic stock scenes (such as gift boxes, generic packaging, or luxury product photos). Strictly prohibit generic filler phrases like '8k resolution', 'masterpiece', 'hyper-realistic', 'stunning', 'studio lighting', or arbitrary stock photography language unless explicitly required by the design brief.";
 
 const STORAGE_KEYS = {
   IMAGE_PROJECTS: 'sog_image_projects_v2',
@@ -649,3 +649,20 @@ export function deleteSynthesisConcept(id: string): void {
     console.error('Failed to delete synthesis concept:', e);
   }
 }
+
+export function safeStringify(obj: any): string {
+  const seen = new WeakSet();
+  return JSON.stringify(obj, (key, value) => {
+    if (typeof value === 'object' && value !== null) {
+      if (seen.has(value)) {
+        return undefined;
+      }
+      seen.add(value);
+      if (value instanceof Element || value instanceof HTMLElement || (value as any)._reactName || (value as any).__reactFiber$) {
+        return undefined;
+      }
+    }
+    return value;
+  });
+}
+
