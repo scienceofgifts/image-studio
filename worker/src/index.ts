@@ -338,7 +338,7 @@ function generateFallbackSynthesis(inspirations: any[], topic: string) {
 }
 
 function generateFallbackBrief(reqBody: any) {
-  const concept = reqBody.selectedConcept || {};
+  const concept = reqBody.selectedConcepts?.primary || reqBody.selectedConcept || {};
   const idea = reqBody.imageIdea || reqBody.idea || {};
   const params = reqBody.structuredParameters || {};
 
@@ -732,11 +732,39 @@ Generate EXACTLY 5 ORIGINAL visual design concepts. Return JSON schema.
     if (request.method === 'POST' && path === '/api/image-studio/create-brief') {
       try {
         const reqBody = await request.json() as any;
-        const { imageIdea, selectedConcepts, creativeDirection, referenceAnalyses, selectedReferenceCharacteristics, visualDirection, outputMode, intendedOutput, model } = reqBody || {};
+        const {
+          imageIdea,
+          selectedConcepts,
+          creativeDirection,
+          referenceAnalyses,
+          selectedReferenceCharacteristics,
+          visualDirection,
+          outputMode,
+          intendedOutput,
+          model
+        } = reqBody || {};
 
         const promptText = `
 You are a senior Design Director at Science of Gifts.
-Synthesize design decisions into a single, authoritative DESIGN BRIEF in JSON.
+Synthesize all design exploration decisions, concept choices, inspiration analyses, and creative direction into a single, authoritative, professional DESIGN BRIEF.
+
+INPUT DECISIONS:
+- Original Idea: ${JSON.stringify(imageIdea || {})}
+- Selected Primary Concept: ${JSON.stringify(selectedConcepts?.primary || {})}
+- Secondary Influences: ${JSON.stringify(selectedConcepts?.secondary || [])}
+- User Creative Direction: "${creativeDirection || 'Follow selected concept faithfully.'}"
+- Reference Analyses & Selected Characteristics: ${JSON.stringify(selectedReferenceCharacteristics || referenceAnalyses || [])}
+- Structured Visual Direction: ${JSON.stringify(visualDirection || {})}
+- Selected Output Mode: ${outputMode || 'Finished Artwork'}
+- Intended Product Output: ${intendedOutput || 'Standalone Graphic Artwork'}
+
+DESIGN BRIEF INSTRUCTIONS:
+1. Develop an explicit, production-grade brief that an illustrator or prompt engineer can follow.
+2. Account for physical product realities if intended output is a product (t-shirt, mug, poster, etc.): legibility at scale, contrast, negative space, print reproduction suitability.
+3. If outputMode is "Finished Artwork", explicitly account for isolated graphic composition with flat or transparent backgrounds, no physical mockup frames, no models or staged photography.
+4. Include clear "Avoid" exclusions and a "Creative Rationale" explaining why these choices achieve the goal.
+
+Return JSON in the required schema.
 `;
 
         try {
@@ -748,22 +776,34 @@ Synthesize design decisions into a single, authoritative DESIGN BRIEF in JSON.
               responseSchema: {
                 type: Type.OBJECT,
                 properties: {
-                  subject: { type: Type.STRING },
-                  purpose: { type: Type.STRING },
-                  composition: { type: Type.STRING },
-                  visualHierarchy: { type: Type.STRING },
-                  typography: { type: Type.STRING },
-                  illustration: { type: Type.STRING },
-                  color: { type: Type.STRING },
-                  texture: { type: Type.STRING },
-                  eraReferenceLanguage: { type: Type.STRING },
-                  moodCharacter: { type: Type.STRING },
-                  productPrintConsiderations: { type: Type.STRING },
-                  negativeSpace: { type: Type.STRING },
-                  keyElements: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  optionalElements: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  avoid: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  creativeRationale: { type: Type.STRING }
+                  subject: { type: Type.STRING, description: 'Exact subject and core motif depicted' },
+                  purpose: { type: Type.STRING, description: 'What the visual design intends to communicate or achieve' },
+                  composition: { type: Type.STRING, description: 'Layout, framing, arrangement, symmetry/asymmetry' },
+                  visualHierarchy: { type: Type.STRING, description: 'Dominant focal point, secondary elements, tertiary details' },
+                  typography: { type: Type.STRING, description: 'Specific font personality, text content, placement, and hierarchy' },
+                  illustration: { type: Type.STRING, description: 'Rendering style, linework, technique, shading, detail level' },
+                  color: { type: Type.STRING, description: 'Specific color palette, dominant hues, contrast, accent colors' },
+                  texture: { type: Type.STRING, description: 'Surface finish, grain, distress, paper quality, ink feel' },
+                  eraReferenceLanguage: { type: Type.STRING, description: 'Historical or cultural aesthetic reference language' },
+                  moodCharacter: { type: Type.STRING, description: 'Emotional resonance, scholarly/playful tone' },
+                  productPrintConsiderations: { type: Type.STRING, description: 'Print legibility, vector cleanliness, product scale function' },
+                  negativeSpace: { type: Type.STRING, description: 'Breathing room and margin handling' },
+                  keyElements: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'Mandatory visual items that MUST appear'
+                  },
+                  optionalElements: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'Supporting visual items that MAY appear if space permits'
+                  },
+                  avoid: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'Specific visual clichés, elements, or styles to explicitly AVOID'
+                  },
+                  creativeRationale: { type: Type.STRING, description: 'Strategic summary of why these choices work together' }
                 },
                 required: [
                   'subject', 'purpose', 'composition', 'visualHierarchy', 'typography', 'illustration',
@@ -775,9 +815,10 @@ Synthesize design decisions into a single, authoritative DESIGN BRIEF in JSON.
           }));
 
           const brief = JSON.parse(cleanJsonString(resObj.text));
+          console.log(`[Worker Image Studio] Design brief created successfully via model: ${resObj.modelUsed} for endpoint: /api/image-studio/create-brief`);
           return jsonResponse({ success: true, brief, modelUsed: resObj.modelUsed }, 200, corsHeaders);
         } catch (apiError: any) {
-          console.warn(`Gemini API error; using fallback brief generator:`, apiError?.message);
+          console.warn(`[Worker Image Studio] Gemini API error in /api/image-studio/create-brief; using fallback brief generator. Model requested: ${model || 'default'}. Error:`, apiError?.message);
           const fallbackBrief = generateFallbackBrief(reqBody);
           return jsonResponse({
             success: true,
@@ -788,6 +829,7 @@ Synthesize design decisions into a single, authoritative DESIGN BRIEF in JSON.
           }, 200, corsHeaders);
         }
       } catch (err: any) {
+        console.error('[Worker Image Studio] Error in create-brief endpoint:', err?.message);
         return jsonResponse({ success: false, error: err?.message || 'Failed to create design brief' }, 500, corsHeaders);
       }
     }
