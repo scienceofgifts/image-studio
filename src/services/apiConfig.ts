@@ -1,18 +1,12 @@
 /**
  * Resolves the full API URL for backend endpoints.
  *
- * - Routes /api/idea-explorer/* directly to the local server (server.ts), since the external
- *   Cloudflare worker does not host Idea Explorer endpoints.
  * - Reads VITE_GEMINI_API_URL environment variable if configured for remote worker endpoints.
  * - Falls back to relative paths ("/api/...") for local server / proxy.
  */
 export function getApiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
 
-  // Always route Idea Explorer endpoints to the local full-stack server (server.ts)
-  if (cleanPath.startsWith('/api/idea-explorer')) {
-    return cleanPath;
-  }
 
   let baseUrl = (import.meta.env.VITE_GEMINI_API_URL || '').trim();
 
