@@ -105,53 +105,53 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
         </div>
 
         {/* Tab Selector & Search */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center p-1 bg-stone-100 rounded-xl border border-stone-300">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
+          <div className="flex items-center p-1 bg-stone-100 rounded-xl border border-stone-300 overflow-x-auto scrollbar-none shrink min-w-0">
             <button
               onClick={() => setActiveTab('concepts')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap ${
                 activeTab === 'concepts'
                   ? 'bg-white text-stone-900 shadow-2xs font-semibold'
                   : 'text-stone-600 hover:text-stone-900'
               }`}
             >
-              <Bookmark className="w-3.5 h-3.5 text-amber-800" />
+              <Bookmark className="w-3.5 h-3.5 text-amber-800 shrink-0" />
               <span>Saved Concepts ({savedConcepts.length})</span>
             </button>
 
             <button
               onClick={() => setActiveTab('synthesis')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap ${
                 activeTab === 'synthesis'
                   ? 'bg-white text-stone-900 shadow-2xs font-semibold'
                   : 'text-stone-600 hover:text-stone-900'
               }`}
             >
-              <Layers className="w-3.5 h-3.5 text-amber-700" />
+              <Layers className="w-3.5 h-3.5 text-amber-700 shrink-0" />
               <span>Synthesized Concepts ({synthesisConcepts.length})</span>
             </button>
 
             <button
               onClick={() => setActiveTab('projects')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap ${
                 activeTab === 'projects'
                   ? 'bg-white text-stone-900 shadow-2xs font-semibold'
                   : 'text-stone-600 hover:text-stone-900'
               }`}
             >
-              <FolderKanban className="w-3.5 h-3.5 text-stone-500" />
+              <FolderKanban className="w-3.5 h-3.5 text-stone-500 shrink-0" />
               <span>Projects ({projects.length})</span>
             </button>
           </div>
 
-          <div className="relative">
+          <div className="relative shrink-0 w-full sm:w-auto">
             <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Filter gallery..."
-              className="pl-8 pr-3 py-1.5 bg-white border border-stone-300 rounded-xl text-xs text-stone-900 placeholder-stone-400 focus:outline-none focus:border-amber-600 w-36 sm:w-48 shadow-2xs"
+              className="pl-8 pr-3 py-1.5 bg-white border border-stone-300 rounded-xl text-xs text-stone-900 placeholder-stone-400 focus:outline-none focus:border-amber-600 w-full sm:w-48 shadow-2xs"
             />
           </div>
         </div>
