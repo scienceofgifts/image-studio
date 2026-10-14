@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { MainView } from '../types';
-import { FolderKanban, LayoutGrid, Image as ImageIcon, Sliders, Wand2, Plus, Settings, Menu, X } from 'lucide-react';
+import { FolderKanban, LayoutGrid, Image as ImageIcon, Sliders, Wand2, Plus, Settings, Menu, X, Compass } from 'lucide-react';
 import { useOverlay } from '../utils/overlayManager';
 
 interface NavigationProps {
@@ -71,6 +71,18 @@ export const Navigation: React.FC<NavigationProps> = ({
           >
             <LayoutGrid className="w-3.5 h-3.5 text-stone-500" />
             <span>Gallery</span>
+          </button>
+
+          <button
+            onClick={() => handleNavClick('idea-explorer')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap ${
+              activeView === 'idea-explorer'
+                ? 'bg-white text-stone-900 border border-stone-300 shadow-2xs font-semibold'
+                : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
+            }`}
+          >
+            <Compass className="w-3.5 h-3.5 text-amber-700" />
+            <span>Idea Explorer</span>
           </button>
 
           <button
@@ -163,6 +175,18 @@ export const Navigation: React.FC<NavigationProps> = ({
             >
               <LayoutGrid className="w-4 h-4" />
               <span>Gallery</span>
+            </button>
+
+            <button
+              onClick={() => handleNavClick('idea-explorer')}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-medium rounded-xl transition-all ${
+                activeView === 'idea-explorer'
+                  ? 'bg-stone-900 text-white font-semibold'
+                  : 'text-stone-700 hover:bg-stone-100'
+              }`}
+            >
+              <Compass className="w-4 h-4 text-amber-500" />
+              <span>Idea Explorer</span>
             </button>
 
             <button

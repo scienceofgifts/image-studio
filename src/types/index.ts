@@ -1,4 +1,5 @@
-export type MainView = 'projects' | 'project-detail' | 'gallery' | 'inspiration' | 'profiles';
+export type MainView = 'projects' | 'project-detail' | 'gallery' | 'inspiration' | 'profiles' | 'idea-explorer';
+export * from './ideaExplorer';
 
 export type ProjectStatus = 'idea' | 'concepts' | 'inspiration' | 'direction' | 'brief' | 'prompt' | 'completed';
 

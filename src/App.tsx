@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { MainView, ImageProject, SavedConceptItem, InspirationReference, SynthesisConcept } from './types';
+import { MainView, ImageProject, SavedConceptItem, InspirationReference, SynthesisConcept, IdeaExplorerIdea } from './types';
 import { getImageProjects, saveImageProject, DEFAULT_PROMPT_INSTRUCTIONS } from './utils/storage';
 import { Navigation } from './components/Navigation';
 import { ImageStudioWorkspace } from './components/image-studio/ImageStudioWorkspace';
 import { GalleryView } from './components/gallery/GalleryView';
 import { InspirationGallery } from './components/inspiration/InspirationGallery';
 import { VisualProfilesView } from './components/profiles/VisualProfilesView';
+import { IdeaExplorerWorkspace } from './components/idea-explorer/IdeaExplorerWorkspace';
 import { LegacyPromptGenerator } from './components/image-studio/LegacyPromptGenerator';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { NewProjectModal } from './components/common/NewProjectModal';
@@ -139,6 +140,64 @@ export default function App() {
     setActiveView('project-detail');
   };
 
+  const handleCreateProjectFromIdea = (idea: IdeaExplorerIdea) => {
+    const conceptId = `concept-${Date.now()}`;
+    const newProj: ImageProject = {
+      id: `proj-${Date.now()}`,
+      title: idea.title || 'Idea Project',
+      status: 'concepts',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      imageIdea: {
+        idea: `${idea.title} - ${idea.description}`,
+        productType: idea.refinementSnapshot?.intendedUse || 'Graphic Artwork / Apparel',
+        intendedUse: idea.refinementSnapshot?.intendedUse || 'High-quality standalone artwork and print graphic',
+        audience: idea.refinementSnapshot?.audience || 'General enthusiasts',
+        subject: idea.corePremise || idea.title,
+        desiredMood: idea.tags?.join(', ') || 'Sophisticated, thoughtful',
+        userNotes: (idea.executionSuggestions && idea.executionSuggestions.length > 0)
+          ? `Execution suggestions:\n${idea.executionSuggestions.map(s => `- ${s}`).join('\n')}`
+          : '',
+        constraints: idea.refinementSnapshot?.excludeElements?.join(', ') || ''
+      },
+      outputMode: 'Finished Artwork',
+      intendedOutput: 'Graphic Artwork',
+      visualConcepts: [{
+        id: conceptId,
+        conceptName: idea.title,
+        coreVisualIdea: idea.corePremise || idea.description,
+        whyItWorks: idea.description,
+        composition: 'Balanced central graphic focal point',
+        keyVisualElements: idea.tags || [idea.title],
+        typographyDirection: 'Clean editorial typography',
+        illustrationDirection: idea.executionSuggestions?.[0] || 'Detailed graphic vector illustration',
+        overallCharacter: idea.tags?.[0] || 'Distinctive design',
+        possibleProductSuitability: idea.refinementSnapshot?.intendedUse || 'Apparel & Prints',
+        potentialRisks: 'Ensure typography remains legible on darker substrates'
+      }],
+      conceptSelections: { [conceptId]: 'primary' },
+      creativeDirection: idea.corePremise || idea.description,
+      inspirationReferences: [],
+      selectedReferenceCharacteristics: [],
+      visualDirection: {
+        composition: 'Balanced central graphic focal point',
+        typography: 'Editorial typographic accents',
+        illustration: idea.executionSuggestions?.[0] || 'Graphic linework and tonal rendering',
+        color: 'Curated harmonic palette',
+        texture: 'Subtle paper grain',
+        era: 'Contemporary archival',
+        mood: idea.tags?.join(', ') || 'Sophisticated, thoughtful',
+        visualHierarchy: 'Primary focal illustration with supporting typography'
+      },
+      promptInstructions: DEFAULT_PROMPT_INSTRUCTIONS
+    };
+    saveImageProject(newProj);
+    refreshData();
+    setActiveProjectId(newProj.id);
+    setActiveStep('concepts');
+    setActiveView('project-detail');
+  };
+
   // AI API wrapper for inspiration analysis in Gallery
   const handleAnalyzeReferenceGlobal = async (ref: InspirationReference) => {
     const res = await fetch(getApiUrl('/api/image-studio/analyze-reference'), {
@@ -264,6 +323,13 @@ export default function App() {
           onCreateProjectFromConcept={handleCreateProjectFromConcept}
           onCreateProjectFromSynthesis={handleCreateProjectFromSynthesis}
           onRefreshData={refreshData}
+        />
+      )}
+
+      {/* VIEW 3B: IDEA EXPLORER */}
+      {activeView === 'idea-explorer' && (
+        <IdeaExplorerWorkspace
+          onCreateProjectFromIdea={handleCreateProjectFromIdea}
         />
       )}
 

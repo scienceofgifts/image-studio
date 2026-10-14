@@ -849,8 +849,200 @@ Return JSON in the specified schema.
   }
 });
 
+// ----------------------------------------------------
+// IDEA EXPLORER ENDPOINTS
+// ----------------------------------------------------
 
+const IDEA_EXPLORER_SCHEMA = {
+  type: Type.ARRAY,
+  description: 'List of exactly 10 distinct, original creative ideas',
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      title: { type: Type.STRING, description: 'Short, memorable, distinctive idea title' },
+      description: { type: Type.STRING, description: '1-3 sentences explaining the creative idea and why it works' },
+      corePremise: { type: Type.STRING, description: 'The central visual hook, metaphor, or conceptual twist' },
+      executionSuggestions: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description: '2-3 practical visual, typographic, or layout execution suggestions'
+      },
+      tags: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description: '2-4 tags characterizing tone, aesthetic, or category'
+      }
+    },
+    required: ['title', 'description', 'corePremise']
+  }
+};
 
+/**
+ * 1. Generate 10 Ideas (Initial or Refined)
+ */
+app.post('/api/idea-explorer/generate', async (req, res) => {
+  try {
+    const { topic, creativeDirection, refinements, excludedPremises, model } = req.body || {};
+
+    if (!topic || typeof topic !== 'string' || !topic.trim()) {
+      return res.status(400).json({ success: false, error: 'A valid exploration topic is required.' });
+    }
+
+    const tonesStr = refinements?.tones?.length ? `Tone: ${refinements.tones.join(', ')}` : '';
+    const aestheticsStr = refinements?.aesthetics?.length ? `Aesthetic: ${refinements.aesthetics.join(', ')}` : '';
+    const audienceStr = refinements?.audience ? `Audience: ${refinements.audience}` : '';
+    const intendedUseStr = refinements?.intendedUse ? `Intended Product/Use: ${refinements.intendedUse}` : '';
+    const includeStr = refinements?.includeElements?.length ? `Must Include: ${refinements.includeElements.join(', ')}` : '';
+    const excludeStr = refinements?.excludeElements?.length ? `Must Avoid/Exclude: ${refinements.excludeElements.join(', ')}` : '';
+    const customInstStr = refinements?.customInstructions ? `Custom Constraints: ${refinements.customInstructions}` : '';
+    const excludedPremisesStr = excludedPremises?.length ? `PREVIOUSLY EXPLORED CONCEPTS TO AVOID REPEATING:\n- ${excludedPremises.join('\n- ')}` : '';
+
+    const promptText = `
+You are a senior creative director and lead conceptual ideator for Science of Gifts.
+Your objective is to generate EXACTLY 10 GENUINELY DISTINCT, ORIGINAL, AND COMPELLING creative gift and design concepts for the topic below.
+
+EXPLORATION TOPIC:
+"${topic.trim()}"
+
+${creativeDirection ? `ACTIVE CREATIVE DIRECTION:\n"${creativeDirection.trim()}"\n` : ''}
+${[tonesStr, aestheticsStr, audienceStr, intendedUseStr, includeStr, excludeStr, customInstStr].filter(Boolean).length > 0 ? `REFINEMENT CRITERIA:\n${[tonesStr, aestheticsStr, audienceStr, intendedUseStr, includeStr, excludeStr, customInstStr].filter(Boolean).join('\n')}\n` : ''}
+${excludedPremisesStr ? `${excludedPremisesStr}\n` : ''}
+
+CRITICAL DIVERSITY & CREATIVE EXCELLENCE INSTRUCTIONS:
+1. Generate EXACTLY 10 ideas.
+2. DIVERSITY OF THOUGHT: Explore genuinely different conceptual angles:
+   - Clever visual metaphors and unexpected analogies.
+   - Witty historical or thematic wordplay and typography-led statements.
+   - Deconstructive or anatomical/specimen takes.
+   - Recontextualization (placing the subject in an unexpected era, institution, or frame).
+   - Quiet, sophisticated editorial tributes vs. bold irreverent statements.
+3. NO SHALLOW REPETITION: Do NOT repeat the same basic punchline or layout with minor wording tweaks across multiple cards. Each idea must possess an independent conceptual premise.
+4. COMMERCIAL & VISUAL VIABILITY: Each concept must have tangible visual potential suitable for artwork, apparel, drinkware, prints, or gift items.
+5. Provide a short, catchy title, a 1-3 sentence description, a crisp core premise, execution suggestions, and relevant tags.
+
+Return JSON in the specified array schema.
+`;
+
+    const resObj = await callGeminiWithFallback((modelToUse) => ({
+      model: modelToUse,
+      contents: promptText,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: IDEA_EXPLORER_SCHEMA
+      }
+    }), model);
+
+    const parsed = JSON.parse(cleanJsonString(resObj.text));
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      throw new Error('AI returned an invalid or empty list of ideas.');
+    }
+
+    const ideas = parsed.slice(0, 10).map((item: any, idx: number) => ({
+      id: item.id || `idea-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
+      title: item.title || `Concept ${idx + 1}`,
+      description: item.description || '',
+      corePremise: item.corePremise || '',
+      executionSuggestions: Array.isArray(item.executionSuggestions) ? item.executionSuggestions : [],
+      tags: Array.isArray(item.tags) ? item.tags : []
+    }));
+
+    return res.json({
+      success: true,
+      ideas,
+      generationType: creativeDirection || Object.keys(refinements || {}).length > 0 ? 'refined' : 'initial',
+      modelUsed: resObj.modelUsed
+    });
+  } catch (error: any) {
+    console.error('Error generating idea-explorer ideas:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to generate ideas. Please retry.'
+    });
+  }
+});
+
+/**
+ * 2. Branch 10 Ideas from Selected Parent Ideas
+ */
+app.post('/api/idea-explorer/branch', async (req, res) => {
+  try {
+    const { topic, parentIdeas, creativeDirection, refinements, excludedPremises, model } = req.body || {};
+
+    if (!topic || typeof topic !== 'string' || !topic.trim()) {
+      return res.status(400).json({ success: false, error: 'A valid exploration topic is required.' });
+    }
+
+    if (!Array.isArray(parentIdeas) || parentIdeas.length === 0) {
+      return res.status(400).json({ success: false, error: 'At least one parent idea must be selected to branch.' });
+    }
+
+    const parentSummaries = parentIdeas.map((p: any, i: number) => 
+      `PARENT IDEA ${i + 1}: "${p.title}"\n- Core Premise: ${p.corePremise || p.description}\n- Details: ${p.description}`
+    ).join('\n\n');
+
+    const promptText = `
+You are a senior creative director and conceptual branching strategist for Science of Gifts.
+Your objective is to generate EXACTLY 10 NEW, ORIGINAL creative gift and design concepts BRANCHED FROM and INSPIRED BY the user's selected parent idea(s).
+
+ORIGINAL TOPIC:
+"${topic.trim()}"
+
+SELECTED PARENT IDEAS TO BRANCH FROM:
+${parentSummaries}
+
+${creativeDirection ? `USER BRANCHING DIRECTIVE:\n"${creativeDirection.trim()}"\n` : 'USER BRANCHING DIRECTIVE:\nDevelop this creative direction further into fresh, unexpected variations and related concepts.\n'}
+${excludedPremises?.length ? `PREVIOUSLY SEEN CONCEPTS TO AVOID REPEATING:\n- ${excludedPremises.join('\n- ')}\n` : ''}
+
+BRANCHING INSTRUCTIONS:
+1. Understand the UNDERLYING CREATIVE MECHANISM, tone, and visual logic that made the parent idea(s) promising.
+2. BRANCH, DO NOT COPY: Generate 10 NEW sister concepts that explore that creative vein in distinct, unexpected ways. Do NOT merely restate or paraphrase the parent ideas.
+3. If multiple parent ideas are selected, identify their shared creative spirit, synthesize their themes, or explore the intersection between them.
+4. Provide a punchy title, a clear 1-3 sentence explanation, the central premise, execution suggestions, and descriptive tags.
+
+Return JSON in the specified array schema.
+`;
+
+    const resObj = await callGeminiWithFallback((modelToUse) => ({
+      model: modelToUse,
+      contents: promptText,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: IDEA_EXPLORER_SCHEMA
+      }
+    }), model);
+
+    const parsed = JSON.parse(cleanJsonString(resObj.text));
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      throw new Error('AI returned an invalid or empty list of ideas.');
+    }
+
+    const parentIds = parentIdeas.map((p: any) => p.id).filter(Boolean);
+
+    const ideas = parsed.slice(0, 10).map((item: any, idx: number) => ({
+      id: item.id || `idea-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
+      title: item.title || `Branched Concept ${idx + 1}`,
+      description: item.description || '',
+      corePremise: item.corePremise || '',
+      executionSuggestions: Array.isArray(item.executionSuggestions) ? item.executionSuggestions : [],
+      tags: Array.isArray(item.tags) ? item.tags : [],
+      parentIdeaIds: parentIds
+    }));
+
+    return res.json({
+      success: true,
+      ideas,
+      parentIdeaIds: parentIds,
+      generationType: 'branched',
+      modelUsed: resObj.modelUsed
+    });
+  } catch (error: any) {
+    console.error('Error branching idea-explorer ideas:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to branch ideas. Please retry.'
+    });
+  }
+});
 
 // ----------------------------------------------------
 // VITE / STATIC FILE HANDLING
