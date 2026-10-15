@@ -20,7 +20,7 @@ import {
   toggleSaveIdeaExplorerItem,
   isIdeaExplorerItemSaved
 } from '../../utils/ideaExplorerStorage';
-import { getApiUrl, apiFetch } from '../../services/apiConfig';
+import { getApiUrl, apiFetch, safeParseJsonResponse } from '../../services/apiConfig';
 import { getGlobalDefaultModel } from '../../utils/models';
 import { ModelSelector } from '../common/ModelSelector';
 import { RefinementsPanel } from './RefinementsPanel';
@@ -245,7 +245,7 @@ export const IdeaExplorerWorkspace: React.FC<IdeaExplorerWorkspaceProps> = ({
         })
       });
 
-      const data = await res.json();
+      const data = await safeParseJsonResponse(res);
       if (!data.success) {
         throw new Error(data.error || 'Failed to generate ideas. Please retry.');
       }
@@ -358,7 +358,7 @@ export const IdeaExplorerWorkspace: React.FC<IdeaExplorerWorkspaceProps> = ({
       })
     });
 
-    const data = await res.json();
+    const data = await safeParseJsonResponse(res);
     if (!data.success) {
       throw new Error(data.error || 'Failed to branch ideas.');
     }

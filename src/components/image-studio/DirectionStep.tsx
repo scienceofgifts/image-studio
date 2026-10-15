@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ImageProject, StructuredVisualDirection, DirectionProfile } from '../../types';
 import { StructuredVisualParametersSelector } from './StructuredVisualParametersSelector';
 import { getDirectionProfiles, saveDirectionProfile, deleteDirectionProfile } from '../../utils/storage';
@@ -15,12 +15,22 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
   onUpdateProject,
   onNextStep
 }) => {
-  const [profiles, setProfiles] = useState<DirectionProfile[]>(getDirectionProfiles());
-  const [selectedProfileId, setSelectedProfileId] = useState<string>('');
+  const [profiles, setProfiles] = useState<DirectionProfile[]>(() => getDirectionProfiles());
+  const [selectedProfileId, setSelectedProfileId] = useState<string>(project.directionProfileId || '');
   const [creativeDir, setCreativeDir] = useState<string>(project.creativeDirection || '');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
+
+  // Keep selectedProfileId in sync when project changes or when project.directionProfileId updates
+  useEffect(() => {
+    setSelectedProfileId(project.directionProfileId || '');
+  }, [project.id, project.directionProfileId]);
+
+  // Keep creativeDir in sync when project changes or creativeDirection updates
+  useEffect(() => {
+    setCreativeDir(project.creativeDirection || '');
+  }, [project.id, project.creativeDirection]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -44,18 +54,25 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
 
   const handleApplyProfile = (profileId: string) => {
     setSelectedProfileId(profileId);
-    if (!profileId) return;
-    const prof = profiles.find(p => p.id === profileId);
-    if (prof) {
-      // Copy structured values into active project without mutating the saved profile
+    if (!profileId) {
       onUpdateProject({
         ...project,
-        visualDirection: JSON.parse(JSON.stringify(prof.visualDirection)),
-        creativeDirection: prof.creativeDirection !== undefined ? prof.creativeDirection : project.creativeDirection
+        directionProfileId: ''
       });
-      if (prof.creativeDirection !== undefined) {
-        setCreativeDir(prof.creativeDirection);
-      }
+      return;
+    }
+    const prof = profiles.find(p => p.id === profileId);
+    if (prof) {
+      // Deep clone visualDirection into active project without mutating the saved profile
+      const clonedVisualDirection = JSON.parse(JSON.stringify(prof.visualDirection));
+      const newCreativeDir = prof.creativeDirection !== undefined ? prof.creativeDirection : (project.creativeDirection || '');
+      setCreativeDir(newCreativeDir);
+      onUpdateProject({
+        ...project,
+        directionProfileId: profileId,
+        visualDirection: clonedVisualDirection,
+        creativeDirection: newCreativeDir
+      });
       showToast(`Applied direction profile: "${prof.name}"`);
     }
   };
@@ -74,6 +91,10 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
     saveDirectionProfile(newProf);
     setProfiles(getDirectionProfiles());
     setSelectedProfileId(newProf.id);
+    onUpdateProject({
+      ...project,
+      directionProfileId: newProf.id
+    });
     setShowSaveModal(false);
     setNewProfileName('');
     showToast(`Saved new profile: "${newProf.name}"`);
@@ -95,6 +116,11 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
     };
     saveDirectionProfile(updated);
     setProfiles(getDirectionProfiles());
+    onUpdateProject({
+      ...project,
+      directionProfileId: updated.id,
+      creativeDirection: creativeDir
+    });
     showToast(`Updated profile: "${prof.name}"`);
   };
 
@@ -102,7 +128,7 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
     const prof = profiles.find(p => p.id === id);
     if (!prof) return;
     const dup: DirectionProfile = {
-      ...prof,
+      ...JSON.parse(JSON.stringify(prof)),
       id: 'dir-prof-' + Date.now(),
       name: `${prof.name} (Copy)`,
       createdAt: new Date().toISOString(),
@@ -111,6 +137,10 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
     saveDirectionProfile(dup);
     setProfiles(getDirectionProfiles());
     setSelectedProfileId(dup.id);
+    onUpdateProject({
+      ...project,
+      directionProfileId: dup.id
+    });
     showToast(`Duplicated profile as "${dup.name}"`);
   };
 
@@ -120,7 +150,13 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
     if (confirm(`Are you sure you want to delete profile "${prof.name}"?`)) {
       deleteDirectionProfile(id);
       setProfiles(getDirectionProfiles());
-      if (selectedProfileId === id) setSelectedProfileId('');
+      if (selectedProfileId === id) {
+        setSelectedProfileId('');
+        onUpdateProject({
+          ...project,
+          directionProfileId: ''
+        });
+      }
       showToast(`Deleted profile "${prof.name}"`);
     }
   };
@@ -144,6 +180,7 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
     id => project.conceptSelections[id] === 'avoid'
   );
   const avoidConcepts = project.visualConcepts.filter(c => avoidIds.includes(c.id));
+  const selectedProfile = profiles.find(p => p.id === selectedProfileId);
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 py-4 relative">
@@ -241,6 +278,14 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
             </button>
           )}
         </div>
+
+        {selectedProfile && (
+          <div className="flex items-center gap-2 pt-1 text-[11px] text-amber-900 bg-amber-100/70 px-3.5 py-2 rounded-xl border border-amber-300/80">
+            <Check className="w-3.5 h-3.5 text-amber-800 shrink-0" />
+            <span className="font-semibold">Applied Profile: &ldquo;{selectedProfile.name}&rdquo;</span>
+            <span className="text-amber-800/80">· Modifying parameters below customizes this design. Click &ldquo;Update Profile&rdquo; to save edits to this profile, or &ldquo;Save As New Profile&rdquo; to create another.</span>
+          </div>
+        )}
       </div>
 
       {/* Save Profile Modal Prompt */}

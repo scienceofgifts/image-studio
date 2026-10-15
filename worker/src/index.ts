@@ -405,7 +405,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const corsHeaders = getCorsHeaders(request, env);
     const url = new URL(request.url);
-    const path = url.pathname;
+    const path = url.pathname.replace(/\/+$/, '') || '/';
 
     // Handle OPTIONS Preflight
     if (request.method === 'OPTIONS') {
@@ -906,7 +906,7 @@ Return JSON in the specified schema.
     }
 
     // POST /api/idea-explorer/generate
-    if (request.method === 'POST' && path === '/api/idea-explorer/generate') {
+    if (request.method === 'POST' && (path === '/api/idea-explorer/generate' || path === '/idea-explorer/generate')) {
       try {
         const reqBody = await request.json() as any;
         const { topic, creativeDirection, refinements, excludedPremises, model } = reqBody || {};
@@ -979,7 +979,13 @@ Return JSON in the specified array schema.
           }
         }));
 
-        const parsed = JSON.parse(cleanJsonString(resObj.text));
+        let parsed: any[];
+        try {
+          const raw = JSON.parse(cleanJsonString(resObj.text));
+          parsed = Array.isArray(raw) ? raw : (Array.isArray(raw?.ideas) ? raw.ideas : (Array.isArray(raw?.items) ? raw.items : []));
+        } catch (jsonErr: any) {
+          throw new Error(`Failed to parse AI output as JSON: ${jsonErr?.message || 'Invalid format'}`);
+        }
         if (!Array.isArray(parsed) || parsed.length === 0) {
           throw new Error('AI returned an invalid or empty list of ideas.');
         }
@@ -1006,7 +1012,7 @@ Return JSON in the specified array schema.
     }
 
     // POST /api/idea-explorer/branch
-    if (request.method === 'POST' && path === '/api/idea-explorer/branch') {
+    if (request.method === 'POST' && (path === '/api/idea-explorer/branch' || path === '/idea-explorer/branch')) {
       try {
         const reqBody = await request.json() as any;
         const { topic, parentIdeas, creativeDirection, refinements, excludedPremises, model } = reqBody || {};
@@ -1074,7 +1080,13 @@ Return JSON in the specified array schema.
           }
         }));
 
-        const parsed = JSON.parse(cleanJsonString(resObj.text));
+        let parsed: any[];
+        try {
+          const raw = JSON.parse(cleanJsonString(resObj.text));
+          parsed = Array.isArray(raw) ? raw : (Array.isArray(raw?.ideas) ? raw.ideas : (Array.isArray(raw?.items) ? raw.items : []));
+        } catch (jsonErr: any) {
+          throw new Error(`Failed to parse AI output as JSON: ${jsonErr?.message || 'Invalid format'}`);
+        }
         if (!Array.isArray(parsed) || parsed.length === 0) {
           throw new Error('AI returned an invalid or empty list of ideas.');
         }

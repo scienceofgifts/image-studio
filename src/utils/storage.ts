@@ -1,4 +1,4 @@
-import { ImageProject, SavedConceptItem, InspirationReference, VisualProfile, SynthesisConcept, DirectionProfile } from '../types';
+import { ImageProject, SavedConceptItem, InspirationReference, VisualProfile, SynthesisConcept, DirectionProfile, StructuredVisualDirection, StructuredVisualParameters } from '../types';
 
 export const DEFAULT_PROMPT_INSTRUCTIONS = 
   "Translate the approved design brief into a precise, concrete image-generation prompt. Strictly describe the actual subject, composition, visual hierarchy, typography, illustration style, color palette, and production requirements specified in the brief. Never substitute the user's specific subject with generic stock scenes (such as gift boxes, generic packaging, or luxury product photos). Strictly prohibit generic filler phrases like '8k resolution', 'masterpiece', 'hyper-realistic', 'stunning', 'studio lighting', or arbitrary stock photography language unless explicitly required by the design brief.";
@@ -139,8 +139,32 @@ const SAMPLE_IMAGE_PROJECT: ImageProject = {
     texture: 'Authentic aged paper grain and slight ink impression',
     era: 'Victorian archival museum specimen (c. 1885)',
     mood: 'Scholarly, witty, honorable, nostalgic',
-    visualHierarchy: 'Central specimen illustration leading to top accession tag and bottom Latin motto'
+    visualHierarchy: 'Central specimen illustration leading to top accession tag and bottom Latin motto',
+    parameters: {
+      compositions: ['Centered', 'Balanced'],
+      framings: ['Framed', 'Badge'],
+      customComposition: 'Specimen plaque frame with formal border lines and accession labels',
+      typographyFontCharacters: ['Slab Serif', 'Monospaced'],
+      typographyRoles: ['Balanced'],
+      typographyCharacters: ['Academic', 'Vintage'],
+      customTypography: '19th-century specimen taxonomy labeling and monospaced catalog accession codes',
+      illustrationStyles: ['Engraving', 'Etching'],
+      customIllustration: 'Fine copperplate woodcut etching with cross-hatching',
+      colorPalettes: ['Monochrome', 'Black + Cream'],
+      customColorHex: '#1c1917',
+      customColorNote: 'Deep iron gall black on warm off-white archival parchment canvas',
+      textures: ['Aged Paper', 'Paper Grain'],
+      customTexture: 'Authentic 19th-century aged rag paper grain and subtle letterpress plate impression',
+      eras: ['Victorian', 'Archival'],
+      customEra: 'Victorian archival museum specimen (c. 1885)',
+      moods: ['Scholarly', 'Witty', 'Nostalgic', 'Refined'],
+      customMood: 'Scholarly museum curiosity with dry intellectual wit',
+      hierarchyPrimary: 'Central Object',
+      hierarchySecondary: ['Supporting Typography', 'Decorative Elements'],
+      hierarchyCustomNote: 'Central specimen illustration leading to accession tag and motto'
+    }
   },
+  directionProfileId: 'prof-victorian-specimen',
   designBrief: {
     subject: 'A standalone graphic tribute depicting the "History Educator" as a classified museum specimen (Accession No. 1892-HIST).',
     purpose: 'To create a sophisticated, witty gift graphic for history teachers that feels like an authentic 19th-century museum catalog entry.',
@@ -201,7 +225,29 @@ export function getImageProjects(): ImageProject[] {
       localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(initial));
       return initial;
     }
-    return JSON.parse(raw);
+    const projects: ImageProject[] = JSON.parse(raw);
+    if (!Array.isArray(projects)) return [SAMPLE_IMAGE_PROJECT];
+
+    let hasMigration = false;
+    const result = projects.map(proj => {
+      if (proj.visualDirection && !proj.visualDirection.parameters) {
+        hasMigration = true;
+        return {
+          ...proj,
+          visualDirection: {
+            ...proj.visualDirection,
+            parameters: synthesizeParametersFromDirection(proj.visualDirection)
+          }
+        };
+      }
+      return proj;
+    });
+
+    if (hasMigration) {
+      localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(result));
+    }
+
+    return result;
   } catch (e) {
     console.error('Failed to load image projects:', e);
     return [SAMPLE_IMAGE_PROJECT];
@@ -584,7 +630,8 @@ export function exportAllData(): string {
     savedConcepts: getSavedConcepts(),
     inspirationLibrary: getInspirationLibrary(),
     visualProfiles: getVisualProfiles(),
-    synthesisConcepts: getSynthesisConcepts()
+    synthesisConcepts: getSynthesisConcepts(),
+    directionProfiles: getDirectionProfiles()
   };
   return JSON.stringify(data, null, 2);
 }
@@ -606,6 +653,9 @@ export function importAllData(jsonStr: string): boolean {
     }
     if (Array.isArray(data.synthesisConcepts)) {
       localStorage.setItem(STORAGE_KEYS.SYNTHESIS_CONCEPTS, JSON.stringify(data.synthesisConcepts));
+    }
+    if (Array.isArray(data.directionProfiles)) {
+      localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(data.directionProfiles.map(ensureProfileParameters)));
     }
     return true;
   } catch (e) {
@@ -673,51 +723,262 @@ const DEFAULT_DIRECTION_PROFILES: DirectionProfile[] = [
     name: 'Victorian Museum Specimen',
     version: 1,
     visualDirection: {
-      composition: 'Centered specimen plaque frame with formal border lines',
-      typography: '19th-century slab serif with monospaced catalog numbering',
+      composition: 'Centered, Framed',
+      typography: 'Slab Serif, Monospaced, Role: Balanced, Editorial character, Formal character',
       illustration: 'Fine copperplate woodcut etching with cross-hatching',
       color: 'Monochrome deep iron black on warm off-white parchment canvas',
       texture: 'Authentic aged paper grain and slight ink impression',
       era: 'Victorian archival museum specimen (c. 1885)',
       mood: 'Scholarly, witty, honorable, nostalgic',
-      visualHierarchy: 'Central specimen illustration leading to top accession tag and bottom motto'
+      visualHierarchy: 'Central specimen illustration leading to top accession tag and bottom Latin motto',
+      parameters: {
+        compositions: ['Centered', 'Balanced'],
+        framings: ['Centered', 'Framed'],
+        customComposition: 'Centered specimen plaque frame with formal border lines',
+        typographyFontCharacters: ['Slab Serif', 'Monospaced'],
+        typographyRoles: ['Balanced'],
+        typographyCharacters: ['Editorial', 'Formal'],
+        customTypography: '19th-century slab serif with monospaced catalog numbering',
+        illustrationStyles: ['Etching', 'Engraving', 'Scientific Diagram'],
+        customIllustration: 'Fine copperplate woodcut etching with cross-hatching',
+        colorPalettes: ['Monochrome', 'Black + Cream'],
+        customColorHex: '#1c1917',
+        customColorNote: 'Monochrome deep iron black on warm off-white parchment canvas',
+        textures: ['Aged Paper', 'Ink Texture', 'Paper Grain'],
+        customTexture: 'Authentic aged paper grain and slight ink impression',
+        eras: ['Victorian', 'Archival', 'Museum'],
+        customEra: 'Victorian archival museum specimen (c. 1885)',
+        moods: ['Scholarly', 'Nostalgic', 'Refined', 'Witty'],
+        customMood: 'Scholarly, witty, honorable, nostalgic',
+        hierarchyPrimary: 'Central Object',
+        hierarchySecondary: ['Supporting Typography', 'Decorative Elements'],
+        hierarchyCustomNote: 'Central specimen illustration leading to top accession tag and bottom Latin motto'
+      }
     },
     creativeDirection: 'Ensure formal museum catalog layout with crisp two-color etching linework.',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z'
   },
   {
     id: 'prof-academic-crest',
     name: 'Classic Academic Crest',
     version: 1,
     visualDirection: {
-      composition: 'Symmetrical circular badge with ribbon banner',
-      typography: 'Bold condensed block serif inside circular arc',
+      composition: 'Balanced, Badge Frame',
+      typography: 'Serif, Condensed, Role: Typography-led, Academic character, Formal character',
       illustration: 'Woodcut print style with sharp black-and-white contrast',
       color: 'Cool Academic (Navy, Slate, White)',
       texture: 'Clean vector screen print',
       era: 'Archival collegiate classic',
       mood: 'Authoritative, collegiate, honorable',
-      visualHierarchy: 'Primary focal crest emblem centered with curved banner'
+      visualHierarchy: 'Primary focal crest emblem centered with curved banner',
+      parameters: {
+        compositions: ['Balanced'],
+        framings: ['Badge', 'Centered'],
+        customComposition: 'Symmetrical circular badge with ribbon banner',
+        typographyFontCharacters: ['Serif', 'Condensed'],
+        typographyRoles: ['Typography-led'],
+        typographyCharacters: ['Academic', 'Formal'],
+        customTypography: 'Bold condensed block serif inside circular arc',
+        illustrationStyles: ['Woodcut', 'Line Art'],
+        customIllustration: 'Woodcut print style with sharp black-and-white contrast',
+        colorPalettes: ['Cool Academic', 'High Contrast'],
+        customColorHex: '#1e3a8a',
+        customColorNote: 'Navy, Slate, White with high contrast emblem accents',
+        textures: ['Clean', 'Screen Print'],
+        customTexture: 'Clean vector screen print with sharp badge edges',
+        eras: ['Academic', 'Archival'],
+        customEra: 'Archival collegiate classic',
+        moods: ['Scholarly', 'Sophisticated', 'Serious'],
+        customMood: 'Authoritative, collegiate, honorable',
+        hierarchyPrimary: 'Symbol',
+        hierarchySecondary: ['Supporting Typography', 'Decorative Elements'],
+        hierarchyCustomNote: 'Primary focal crest emblem centered with curved banner'
+      }
     },
     creativeDirection: 'Maintain clean vector lines suitable for apparel embroidery and badges.',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'prof-vintage-patent',
+    name: 'Vintage Scientific Patent',
+    version: 1,
+    visualDirection: {
+      composition: 'Dense, Grid Frame, Framed Frame',
+      typography: 'Monospaced, Sans Serif, Role: Balanced, Industrial character, Academic character',
+      illustration: 'Scientific Diagram, Line Art',
+      color: 'Monochrome, Low Contrast',
+      texture: 'Paper Grain, Letterpress',
+      era: 'Industrial, Scientific',
+      mood: 'Scholarly, Experimental, Serious',
+      visualHierarchy: 'Primary: Central Object, Secondary: Supporting Typography, Background',
+      parameters: {
+        compositions: ['Dense', 'Balanced'],
+        framings: ['Grid', 'Framed'],
+        customComposition: 'Exploded blueprint schematic layout with figure callouts',
+        typographyFontCharacters: ['Monospaced', 'Sans Serif'],
+        typographyRoles: ['Balanced'],
+        typographyCharacters: ['Industrial', 'Academic'],
+        customTypography: 'Technical patent labeling and dimension annotations',
+        illustrationStyles: ['Scientific Diagram', 'Line Art'],
+        customIllustration: 'Drafting schematics with dimension lines and cutaways',
+        colorPalettes: ['Monochrome', 'Low Contrast'],
+        customColorHex: '#334155',
+        customColorNote: 'Technical drafting ink on off-white parchment',
+        textures: ['Paper Grain', 'Letterpress'],
+        customTexture: 'Architectural drafting paper texture',
+        eras: ['Industrial', 'Scientific'],
+        customEra: 'Late 19th-century patent bureau schematics',
+        moods: ['Scholarly', 'Experimental', 'Serious'],
+        customMood: 'Analytical inventor precision',
+        hierarchyPrimary: 'Central Object',
+        hierarchySecondary: ['Supporting Typography', 'Background'],
+        hierarchyCustomNote: 'Technical figure in center with perimeter patent spec annotations'
+      }
+    },
+    creativeDirection: 'Precise technical drafting aesthetic with numbered callouts and figure labels.',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'prof-botanical-press',
+    name: 'Botanical Field Press',
+    version: 1,
+    visualDirection: {
+      composition: 'Minimal, Asymmetric Frame, Full Bleed Frame',
+      typography: 'Serif, Handwritten, Role: Image-led, Vintage character, Editorial character',
+      illustration: 'Botanical Illustration, Etching',
+      color: 'Earth Tones, Muted Vintage',
+      texture: 'Aged Paper, Rough, Paper Grain',
+      era: 'Victorian, Museum',
+      mood: 'Refined, Nostalgic, Scholarly',
+      visualHierarchy: 'Primary: Illustration, Secondary: Supporting Typography, Decorative Elements',
+      parameters: {
+        compositions: ['Minimal'],
+        framings: ['Asymmetric', 'Full Bleed'],
+        customComposition: 'Herbarium specimen mount with pressed flora placement',
+        typographyFontCharacters: ['Serif', 'Handwritten'],
+        typographyRoles: ['Image-led'],
+        typographyCharacters: ['Vintage', 'Editorial'],
+        customTypography: 'Hand-inked Linnaean taxonomic classification cursive',
+        illustrationStyles: ['Botanical Illustration', 'Etching'],
+        customIllustration: 'Hand-tinted biological etching with anatomical details',
+        colorPalettes: ['Earth Tones', 'Muted Vintage'],
+        customColorHex: '#3f6212',
+        customColorNote: 'Forest sage, dried sepia, and warm cream',
+        textures: ['Aged Paper', 'Rough', 'Paper Grain'],
+        customTexture: 'Heavy cotton rag paper with deckled edges',
+        eras: ['Victorian', 'Museum'],
+        customEra: '19th-century botanical exploration expedition',
+        moods: ['Refined', 'Nostalgic', 'Scholarly'],
+        customMood: 'Quiet naturalist contemplation',
+        hierarchyPrimary: 'Illustration',
+        hierarchySecondary: ['Supporting Typography', 'Decorative Elements'],
+        hierarchyCustomNote: 'Organic specimen dominant with field notes at margin'
+      }
+    },
+    creativeDirection: 'Authentic herbarium press look with naturalist taxonomic notes and dried botanical tones.',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z'
   }
 ];
+
+function synthesizeParametersFromDirection(vd: Partial<StructuredVisualDirection>): StructuredVisualParameters {
+  return {
+    compositions: vd.composition ? vd.composition.split(', ').filter(Boolean) : ['Balanced'],
+    framings: ['Centered'],
+    customComposition: '',
+    typographyFontCharacters: vd.typography ? vd.typography.split(', ').filter(Boolean) : ['Serif'],
+    typographyRoles: ['Typography-led'],
+    typographyCharacters: ['Editorial'],
+    customTypography: '',
+    illustrationStyles: vd.illustration ? vd.illustration.split(', ').filter(Boolean) : ['Engraving'],
+    customIllustration: '',
+    colorPalettes: vd.color ? vd.color.split(', ').filter(Boolean) : ['Monochrome'],
+    customColorHex: '',
+    customColorNote: '',
+    textures: vd.texture ? vd.texture.split(', ').filter(Boolean) : ['Paper Grain'],
+    customTexture: '',
+    eras: vd.era ? vd.era.split(', ').filter(Boolean) : ['Victorian'],
+    customEra: '',
+    moods: vd.mood ? vd.mood.split(', ').filter(Boolean) : ['Scholarly'],
+    customMood: '',
+    hierarchyPrimary: 'Typography',
+    hierarchySecondary: ['Supporting Illustration'],
+    hierarchyCustomNote: ''
+  };
+}
+
+export function ensureProfileParameters(profile: DirectionProfile): DirectionProfile {
+  const cloned: DirectionProfile = JSON.parse(JSON.stringify(profile));
+  if (!cloned.visualDirection) {
+    cloned.visualDirection = {
+      composition: 'Balanced Composition',
+      typography: 'Serif Typography',
+      illustration: 'Engraving Illustration',
+      color: 'Monochrome',
+      texture: 'Paper Grain',
+      era: 'Victorian',
+      mood: 'Scholarly',
+      visualHierarchy: 'Primary: Typography, Secondary: Supporting Illustration'
+    };
+  }
+
+  const defaultMatch = DEFAULT_DIRECTION_PROFILES.find(d => d.id === cloned.id);
+
+  if (!cloned.visualDirection.parameters) {
+    if (defaultMatch && defaultMatch.visualDirection.parameters) {
+      cloned.visualDirection.parameters = JSON.parse(JSON.stringify(defaultMatch.visualDirection.parameters));
+    } else {
+      cloned.visualDirection.parameters = synthesizeParametersFromDirection(cloned.visualDirection);
+    }
+  } else {
+    // If it's a default profile, ensure it has all structured fields populated
+    if (defaultMatch && defaultMatch.visualDirection.parameters) {
+      cloned.visualDirection.parameters = {
+        ...JSON.parse(JSON.stringify(defaultMatch.visualDirection.parameters)),
+        ...cloned.visualDirection.parameters
+      };
+    }
+
+    const p = cloned.visualDirection.parameters;
+    if (p) {
+      if (!Array.isArray(p.compositions) || p.compositions.length === 0) p.compositions = ['Balanced'];
+      if (!Array.isArray(p.framings) || p.framings.length === 0) p.framings = ['Centered'];
+      if (!Array.isArray(p.typographyFontCharacters) || p.typographyFontCharacters.length === 0) p.typographyFontCharacters = ['Serif'];
+      if (!Array.isArray(p.typographyRoles) || p.typographyRoles.length === 0) p.typographyRoles = ['Typography-led'];
+      if (!Array.isArray(p.typographyCharacters) || p.typographyCharacters.length === 0) p.typographyCharacters = ['Editorial'];
+      if (!Array.isArray(p.illustrationStyles) || p.illustrationStyles.length === 0) p.illustrationStyles = ['Engraving'];
+      if (!Array.isArray(p.colorPalettes) || p.colorPalettes.length === 0) p.colorPalettes = ['Monochrome'];
+      if (!Array.isArray(p.textures) || p.textures.length === 0) p.textures = ['Paper Grain'];
+      if (!Array.isArray(p.eras) || p.eras.length === 0) p.eras = ['Victorian'];
+      if (!Array.isArray(p.moods) || p.moods.length === 0) p.moods = ['Scholarly'];
+      if (!p.hierarchyPrimary) p.hierarchyPrimary = 'Typography';
+      if (!Array.isArray(p.hierarchySecondary) || p.hierarchySecondary.length === 0) p.hierarchySecondary = ['Supporting Illustration'];
+    }
+  }
+
+  return cloned;
+}
 
 export function getDirectionProfiles(): DirectionProfile[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.DIRECTION_PROFILES);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(DEFAULT_DIRECTION_PROFILES));
-      return DEFAULT_DIRECTION_PROFILES;
+      const clonedDefaults = JSON.parse(JSON.stringify(DEFAULT_DIRECTION_PROFILES));
+      localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(clonedDefaults));
+      return clonedDefaults;
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_DIRECTION_PROFILES;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      // Ensure all profiles are deep-cloned and normalized with complete parameters
+      return parsed.map(ensureProfileParameters);
+    }
+    return JSON.parse(JSON.stringify(DEFAULT_DIRECTION_PROFILES));
   } catch (e) {
     console.error('Failed to load direction profiles:', e);
-    return DEFAULT_DIRECTION_PROFILES;
+    return JSON.parse(JSON.stringify(DEFAULT_DIRECTION_PROFILES));
   }
 }
 
@@ -725,7 +986,11 @@ export function saveDirectionProfile(profile: DirectionProfile): void {
   try {
     const profiles = getDirectionProfiles();
     const index = profiles.findIndex(p => p.id === profile.id);
-    const updatedProfile = { ...profile, updatedAt: new Date().toISOString() };
+    const sanitized = ensureProfileParameters(profile);
+    const updatedProfile = { 
+      ...JSON.parse(JSON.stringify(sanitized)), 
+      updatedAt: new Date().toISOString() 
+    };
     if (index >= 0) {
       profiles[index] = updatedProfile;
     } else {
@@ -745,5 +1010,5 @@ export function deleteDirectionProfile(id: string): void {
     console.error('Failed to delete direction profile:', e);
   }
 }
-
-
+export const exportData = exportAllData;
+export const importData = importAllData;

@@ -932,7 +932,8 @@ Return JSON in the specified array schema.
       }
     }), model);
 
-    const parsed = JSON.parse(cleanJsonString(resObj.text));
+    const raw = JSON.parse(cleanJsonString(resObj.text));
+    const parsed = Array.isArray(raw) ? raw : (Array.isArray(raw?.ideas) ? raw.ideas : (Array.isArray(raw?.items) ? raw.items : []));
     if (!Array.isArray(parsed) || parsed.length === 0) {
       throw new Error('AI returned an invalid or empty list of ideas.');
     }
@@ -1011,7 +1012,8 @@ Return JSON in the specified array schema.
       }
     }), model);
 
-    const parsed = JSON.parse(cleanJsonString(resObj.text));
+    const raw = JSON.parse(cleanJsonString(resObj.text));
+    const parsed = Array.isArray(raw) ? raw : (Array.isArray(raw?.ideas) ? raw.ideas : (Array.isArray(raw?.items) ? raw.items : []));
     if (!Array.isArray(parsed) || parsed.length === 0) {
       throw new Error('AI returned an invalid or empty list of ideas.');
     }

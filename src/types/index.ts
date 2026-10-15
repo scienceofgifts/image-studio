@@ -191,6 +191,7 @@ export interface ImageProject {
   selectedReferenceCharacteristics: SelectedCharacteristic[];
 
   visualDirection: StructuredVisualDirection;
+  directionProfileId?: string;
   designBrief?: DesignBrief;
 
   promptInstructions: string;

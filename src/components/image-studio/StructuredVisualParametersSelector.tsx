@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StructuredVisualDirection, StructuredVisualParameters } from '../../types';
 import { Layout, Type, PenTool, Palette, Layers, Clock, Smile, Sparkles, Plus, Check } from 'lucide-react';
 
@@ -9,34 +9,112 @@ interface Props {
   onCreativeDirectionChange: (val: string) => void;
 }
 
+const extractParamsFromValue = (val?: StructuredVisualDirection): StructuredVisualParameters => {
+  if (!val) {
+    return {
+      compositions: ['Balanced'],
+      framings: ['Centered'],
+      typographyFontCharacters: ['Serif'],
+      typographyRoles: ['Typography-led'],
+      typographyCharacters: ['Editorial'],
+      illustrationStyles: ['Engraving'],
+      colorPalettes: ['Monochrome'],
+      textures: ['Paper Grain'],
+      eras: ['Victorian'],
+      moods: ['Scholarly'],
+      hierarchyPrimary: 'Typography',
+      hierarchySecondary: ['Supporting Illustration']
+    };
+  }
+
+  const p = val.parameters;
+  return {
+    compositions: (p?.compositions && p.compositions.length > 0)
+      ? p.compositions
+      : (val.composition ? val.composition.split(', ').filter(Boolean) : ['Balanced']),
+    framings: (p?.framings && p.framings.length > 0)
+      ? p.framings
+      : ['Centered'],
+    customComposition: p?.customComposition || '',
+
+    typographyFontCharacters: (p?.typographyFontCharacters && p.typographyFontCharacters.length > 0)
+      ? p.typographyFontCharacters
+      : (val.typography ? val.typography.split(', ').filter(Boolean) : ['Serif']),
+    typographyRoles: (p?.typographyRoles && p.typographyRoles.length > 0)
+      ? p.typographyRoles
+      : ['Typography-led'],
+    typographyCharacters: (p?.typographyCharacters && p.typographyCharacters.length > 0)
+      ? p.typographyCharacters
+      : ['Editorial'],
+    customTypography: p?.customTypography || '',
+
+    illustrationStyles: (p?.illustrationStyles && p.illustrationStyles.length > 0)
+      ? p.illustrationStyles
+      : (val.illustration ? val.illustration.split(', ').filter(Boolean) : ['Engraving']),
+    customIllustration: p?.customIllustration || '',
+
+    colorPalettes: (p?.colorPalettes && p.colorPalettes.length > 0)
+      ? p.colorPalettes
+      : (val.color ? val.color.split(', ').filter(Boolean) : ['Monochrome']),
+    customColorHex: p?.customColorHex || '',
+    customColorNote: p?.customColorNote || '',
+
+    textures: (p?.textures && p.textures.length > 0)
+      ? p.textures
+      : (val.texture ? val.texture.split(', ').filter(Boolean) : ['Paper Grain']),
+    customTexture: p?.customTexture || '',
+
+    eras: (p?.eras && p.eras.length > 0)
+      ? p.eras
+      : (val.era ? val.era.split(', ').filter(Boolean) : ['Victorian']),
+    customEra: p?.customEra || '',
+
+    moods: (p?.moods && p.moods.length > 0)
+      ? p.moods
+      : (val.mood ? val.mood.split(', ').filter(Boolean) : ['Scholarly']),
+    customMood: p?.customMood || '',
+
+    hierarchyPrimary: p?.hierarchyPrimary || 'Typography',
+    hierarchySecondary: (p?.hierarchySecondary && p.hierarchySecondary.length > 0)
+      ? p.hierarchySecondary
+      : ['Supporting Illustration'],
+    hierarchyCustomNote: p?.hierarchyCustomNote || ''
+  };
+};
+
 export const StructuredVisualParametersSelector: React.FC<Props> = ({
   value,
   onChange,
   creativeDirection,
   onCreativeDirectionChange
 }) => {
-  // Initialize parameters state with defaults or existing values
-  const initParams = value.parameters || {
-    compositions: value.composition ? value.composition.split(', ').filter(Boolean) : ['Balanced'],
-    framings: ['Centered'],
-    typographyFontCharacters: value.typography ? value.typography.split(', ').filter(Boolean) : ['Serif'],
-    typographyRoles: ['Typography-led'],
-    typographyCharacters: ['Editorial'],
-    illustrationStyles: value.illustration ? value.illustration.split(', ').filter(Boolean) : ['Engraving'],
-    colorPalettes: value.color ? value.color.split(', ').filter(Boolean) : ['Monochrome'],
-    textures: value.texture ? value.texture.split(', ').filter(Boolean) : ['Paper Grain'],
-    eras: value.era ? value.era.split(', ').filter(Boolean) : ['Victorian'],
-    moods: value.mood ? value.mood.split(', ').filter(Boolean) : ['Scholarly'],
-    hierarchyPrimary: 'Typography',
-    hierarchySecondary: ['Supporting Illustration']
-  };
+  const lastEmittedRef = useRef<string>('');
+  const [params, setParams] = useState<StructuredVisualParameters>(() => extractParamsFromValue(value));
+  const [showCustomComp, setShowCustomComp] = useState<boolean>(() => Boolean(params.customComposition));
+  const [showCustomTypo, setShowCustomTypo] = useState<boolean>(() => Boolean(params.customTypography));
+  const [showCustomIll, setShowCustomIll] = useState<boolean>(() => Boolean(params.customIllustration));
+  const [showCustomColor, setShowCustomColor] = useState<boolean>(() => Boolean(params.customColorHex || params.customColorNote));
+  const [showCustomEra, setShowCustomEra] = useState<boolean>(() => Boolean(params.customEra));
 
-  const [params, setParams] = useState<StructuredVisualParameters>(initParams);
-  const [showCustomComp, setShowCustomComp] = useState(!!params.customComposition);
-  const [showCustomTypo, setShowCustomTypo] = useState(!!params.customTypography);
-  const [showCustomIll, setShowCustomIll] = useState(!!params.customIllustration);
-  const [showCustomColor, setShowCustomColor] = useState(!!params.customColorHex || !!params.customColorNote);
-  const [showCustomEra, setShowCustomEra] = useState(!!params.customEra);
+  // Synchronize state whenever the incoming value prop changes (e.g. profile applied or project switched)
+  useEffect(() => {
+    const incomingParams = extractParamsFromValue(value);
+    const incomingJson = JSON.stringify(incomingParams);
+
+    // Skip update if this change was triggered by this component's own updateParams
+    if (incomingJson === lastEmittedRef.current) {
+      return;
+    }
+
+    if (JSON.stringify(params) !== incomingJson) {
+      setParams(incomingParams);
+      setShowCustomComp(Boolean(incomingParams.customComposition));
+      setShowCustomTypo(Boolean(incomingParams.customTypography));
+      setShowCustomIll(Boolean(incomingParams.customIllustration));
+      setShowCustomColor(Boolean(incomingParams.customColorHex || incomingParams.customColorNote));
+      setShowCustomEra(Boolean(incomingParams.customEra));
+    }
+  }, [value]);
 
   // Helper to toggle items in array
   const toggleArray = <K extends keyof StructuredVisualParameters>(
@@ -50,6 +128,8 @@ export const StructuredVisualParametersSelector: React.FC<Props> = ({
   };
 
   const updateParams = (newParams: StructuredVisualParameters) => {
+    const json = JSON.stringify(newParams);
+    lastEmittedRef.current = json;
     setParams(newParams);
 
     // Synthesize readable string representations for backward compatibility & AI context
@@ -77,9 +157,20 @@ export const StructuredVisualParametersSelector: React.FC<Props> = ({
       newParams.customColorNote
     ].filter(Boolean).join(', ');
 
-    const textureStr = (newParams.textures || []).filter(Boolean).join(', ');
-    const eraStr = [...newParams.eras, newParams.customEra].filter(Boolean).join(', ');
-    const moodStr = (newParams.moods || []).filter(Boolean).join(', ');
+    const textureStr = [
+      ...(newParams.textures || []),
+      newParams.customTexture
+    ].filter(Boolean).join(', ');
+
+    const eraStr = [
+      ...newParams.eras,
+      newParams.customEra
+    ].filter(Boolean).join(', ');
+
+    const moodStr = [
+      ...(newParams.moods || []),
+      newParams.customMood
+    ].filter(Boolean).join(', ');
 
     const hierarchyStr = `Primary: ${newParams.hierarchyPrimary || 'Balanced'}, Secondary: ${(newParams.hierarchySecondary || []).join(', ')}${
       newParams.hierarchyCustomNote ? ` (${newParams.hierarchyCustomNote})` : ''
@@ -209,10 +300,20 @@ export const StructuredVisualParametersSelector: React.FC<Props> = ({
 
       {/* 2. Typography Direction */}
       <div className="space-y-3 pt-4 border-t border-stone-200/80">
-        <label className="text-xs font-semibold text-stone-900 uppercase tracking-wider flex items-center gap-2">
-          <Type className="w-4 h-4 text-amber-700" />
-          <span>2. Typography Direction</span>
-        </label>
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-semibold text-stone-900 uppercase tracking-wider flex items-center gap-2">
+            <Type className="w-4 h-4 text-amber-700" />
+            <span>2. Typography Direction</span>
+          </label>
+          <button
+            type="button"
+            onClick={() => setShowCustomTypo(!showCustomTypo)}
+            className="text-[11px] text-amber-900 hover:underline font-medium flex items-center gap-1"
+          >
+            <Plus className="w-3 h-3" />
+            <span>Custom Typography</span>
+          </button>
+        </div>
 
         <div className="space-y-2">
           <span className="text-[11px] font-medium text-stone-500 block">Font Classification:</span>
@@ -234,7 +335,26 @@ export const StructuredVisualParametersSelector: React.FC<Props> = ({
                 </button>
               );
             })}
+
+            <button
+              type="button"
+              onClick={() => setShowCustomTypo(!showCustomTypo)}
+              className="px-3 py-1.5 rounded-xl text-xs font-medium border border-dashed border-stone-300 text-stone-600 hover:text-stone-900 hover:border-stone-400 flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Custom Typography</span>
+            </button>
           </div>
+
+          {showCustomTypo && (
+            <input
+              type="text"
+              value={params.customTypography || ''}
+              onChange={(e) => updateParams({ ...params, customTypography: e.target.value })}
+              placeholder="e.g. 19th-century specimen taxonomy labeling and catalog accession codes..."
+              className="w-full mt-2 px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-amber-600"
+            />
+          )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
@@ -430,10 +550,20 @@ export const StructuredVisualParametersSelector: React.FC<Props> = ({
       {/* 6. Era & Mood */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-stone-200/80">
         <div className="space-y-3">
-          <label className="text-xs font-semibold text-stone-900 uppercase tracking-wider flex items-center gap-2">
-            <Clock className="w-4 h-4 text-amber-700" />
-            <span>6. Era / Reference Language</span>
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-semibold text-stone-900 uppercase tracking-wider flex items-center gap-2">
+              <Clock className="w-4 h-4 text-amber-700" />
+              <span>6. Era / Reference Language</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowCustomEra(!showCustomEra)}
+              className="text-[11px] text-amber-900 hover:underline font-medium flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Custom</span>
+            </button>
+          </div>
 
           <div className="flex flex-wrap gap-1.5">
             {eras.map(e => {
@@ -453,7 +583,26 @@ export const StructuredVisualParametersSelector: React.FC<Props> = ({
                 </button>
               );
             })}
+
+            <button
+              type="button"
+              onClick={() => setShowCustomEra(!showCustomEra)}
+              className="px-2.5 py-1.5 rounded-xl text-xs font-medium border border-dashed border-stone-300 text-stone-600 hover:text-stone-900 hover:border-stone-400 flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Custom Era</span>
+            </button>
           </div>
+
+          {showCustomEra && (
+            <input
+              type="text"
+              value={params.customEra || ''}
+              onChange={(e) => updateParams({ ...params, customEra: e.target.value })}
+              placeholder="e.g. Victorian archival museum specimen (c. 1885)..."
+              className="w-full mt-2 px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-amber-600"
+            />
+          )}
         </div>
 
         <div className="space-y-3">
