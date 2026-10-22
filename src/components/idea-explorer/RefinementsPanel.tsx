@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { IdeaExplorerRefinements } from '../../types/ideaExplorer';
-import { ChevronDown, SlidersHorizontal, X, Plus, Sparkles, Filter } from 'lucide-react';
+import { ChevronDown, SlidersHorizontal, X, Plus, Sparkles, Filter, Check } from 'lucide-react';
 
 interface RefinementsPanelProps {
   refinements: IdeaExplorerRefinements;
@@ -65,6 +65,43 @@ export const RefinementsPanel: React.FC<RefinementsPanelProps> = ({
   const [newIncludeTag, setNewIncludeTag] = useState('');
   const [newExcludeTag, setNewExcludeTag] = useState('');
 
+  // Available options state for Target Product / Format
+  const [productOptions, setProductOptions] = useState<string[]>(() => {
+    const list = [...PRESET_PRODUCTS];
+    if (refinements.intendedUse && !list.includes(refinements.intendedUse)) {
+      list.push(refinements.intendedUse);
+    }
+    return list;
+  });
+  const [isAddingProduct, setIsAddingProduct] = useState(false);
+  const [customProductText, setCustomProductText] = useState('');
+  const productInputRef = useRef<HTMLInputElement>(null);
+
+  // Available options state for Target Audience
+  const [audienceOptions, setAudienceOptions] = useState<string[]>(() => {
+    const list = [...PRESET_AUDIENCES];
+    if (refinements.audience && !list.includes(refinements.audience)) {
+      list.push(refinements.audience);
+    }
+    return list;
+  });
+  const [isAddingAudience, setIsAddingAudience] = useState(false);
+  const [customAudienceText, setCustomAudienceText] = useState('');
+  const audienceInputRef = useRef<HTMLInputElement>(null);
+
+  // Synchronize options if external refinements supply custom values
+  useEffect(() => {
+    if (refinements.intendedUse && !productOptions.includes(refinements.intendedUse)) {
+      setProductOptions(prev => [...prev, refinements.intendedUse!]);
+    }
+  }, [refinements.intendedUse]);
+
+  useEffect(() => {
+    if (refinements.audience && !audienceOptions.includes(refinements.audience)) {
+      setAudienceOptions(prev => [...prev, refinements.audience!]);
+    }
+  }, [refinements.audience]);
+
   const activeCount =
     (refinements.tones?.length || 0) +
     (refinements.aesthetics?.length || 0) +
@@ -102,6 +139,64 @@ export const RefinementsPanel: React.FC<RefinementsPanelProps> = ({
       ...refinements,
       audience: refinements.audience === aud ? undefined : aud
     });
+  };
+
+  const handleStartAddProduct = () => {
+    setIsAddingProduct(true);
+    setTimeout(() => productInputRef.current?.focus(), 50);
+  };
+
+  const handleAddCustomProduct = () => {
+    const val = customProductText.trim();
+    if (!val) return;
+
+    if (!productOptions.includes(val)) {
+      setProductOptions(prev => [...prev, val]);
+    }
+    // Auto-select newly added custom chip
+    onChange({
+      ...refinements,
+      intendedUse: val
+    });
+
+    setCustomProductText('');
+    setIsAddingProduct(false);
+  };
+
+  const handleRemoveCustomProduct = (prod: string) => {
+    setProductOptions(prev => prev.filter(p => p !== prod));
+    if (refinements.intendedUse === prod) {
+      onChange({ ...refinements, intendedUse: undefined });
+    }
+  };
+
+  const handleStartAddAudience = () => {
+    setIsAddingAudience(true);
+    setTimeout(() => audienceInputRef.current?.focus(), 50);
+  };
+
+  const handleAddCustomAudience = () => {
+    const val = customAudienceText.trim();
+    if (!val) return;
+
+    if (!audienceOptions.includes(val)) {
+      setAudienceOptions(prev => [...prev, val]);
+    }
+    // Auto-select newly added custom chip
+    onChange({
+      ...refinements,
+      audience: val
+    });
+
+    setCustomAudienceText('');
+    setIsAddingAudience(false);
+  };
+
+  const handleRemoveCustomAudience = (aud: string) => {
+    setAudienceOptions(prev => prev.filter(a => a !== aud));
+    if (refinements.audience === aud) {
+      onChange({ ...refinements, audience: undefined });
+    }
   };
 
   const addIncludeElement = () => {
@@ -245,24 +340,95 @@ export const RefinementsPanel: React.FC<RefinementsPanelProps> = ({
               <label className="font-semibold text-stone-800 text-[11px] uppercase tracking-wider font-mono">
                 Target Product / Format
               </label>
-              <div className="flex flex-wrap gap-1.5">
-                {PRESET_PRODUCTS.map(prod => {
+              <div className="flex flex-wrap items-center gap-1.5">
+                {productOptions.map(prod => {
                   const isSelected = refinements.intendedUse === prod;
+                  const isCustom = !PRESET_PRODUCTS.includes(prod);
                   return (
                     <button
                       key={prod}
                       type="button"
                       onClick={() => handleProductSelect(prod)}
-                      className={`px-2.5 py-1 rounded-lg text-xs transition-all border ${
+                      className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs transition-all border ${
                         isSelected
                           ? 'bg-stone-900 text-white border-stone-900 font-medium'
                           : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100 hover:text-stone-900'
                       }`}
                     >
-                      {prod}
+                      <span>{prod}</span>
+                      {isCustom && (
+                        <span
+                          role="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveCustomProduct(prod);
+                          }}
+                          className={`ml-1.5 -mr-0.5 p-0.5 rounded-full transition-colors ${
+                            isSelected
+                              ? 'hover:bg-white/25 text-white/80 hover:text-white'
+                              : 'hover:bg-stone-200 text-stone-400 hover:text-stone-700'
+                          }`}
+                          title="Remove custom option"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </span>
+                      )}
                     </button>
                   );
                 })}
+
+                {/* Custom Product Input or Add Button */}
+                {isAddingProduct ? (
+                  <div className="inline-flex items-center gap-1 bg-stone-50 border border-stone-300 rounded-lg px-2 py-0.5 focus-within:border-amber-600 focus-within:bg-white transition-all shadow-2xs">
+                    <input
+                      ref={productInputRef}
+                      type="text"
+                      value={customProductText}
+                      onChange={e => setCustomProductText(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomProduct();
+                        } else if (e.key === 'Escape') {
+                          setIsAddingProduct(false);
+                          setCustomProductText('');
+                        }
+                      }}
+                      placeholder="Custom format..."
+                      className="bg-transparent text-xs text-stone-800 placeholder:text-stone-400 focus:outline-hidden w-28 sm:w-36 py-0.5"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCustomProduct}
+                      disabled={!customProductText.trim()}
+                      className="p-0.5 rounded text-stone-700 hover:text-stone-950 hover:bg-stone-200 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                      title="Add & select"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddingProduct(false);
+                        setCustomProductText('');
+                      }}
+                      className="p-0.5 rounded text-stone-400 hover:text-stone-700 hover:bg-stone-200 transition-colors"
+                      title="Cancel"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleStartAddProduct}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-all border border-dashed border-stone-300 text-stone-600 hover:text-stone-900 hover:border-stone-400 hover:bg-stone-50"
+                    title="Add custom target product or format"
+                  >
+                    <Plus className="w-3 h-3 text-stone-500" />
+                    <span>Add Custom</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -271,24 +437,95 @@ export const RefinementsPanel: React.FC<RefinementsPanelProps> = ({
               <label className="font-semibold text-stone-800 text-[11px] uppercase tracking-wider font-mono">
                 Target Audience
               </label>
-              <div className="flex flex-wrap gap-1.5">
-                {PRESET_AUDIENCES.map(aud => {
+              <div className="flex flex-wrap items-center gap-1.5">
+                {audienceOptions.map(aud => {
                   const isSelected = refinements.audience === aud;
+                  const isCustom = !PRESET_AUDIENCES.includes(aud);
                   return (
                     <button
                       key={aud}
                       type="button"
                       onClick={() => handleAudienceSelect(aud)}
-                      className={`px-2.5 py-1 rounded-lg text-xs transition-all border ${
+                      className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs transition-all border ${
                         isSelected
                           ? 'bg-stone-900 text-white border-stone-900 font-medium'
                           : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100 hover:text-stone-900'
                       }`}
                     >
-                      {aud}
+                      <span>{aud}</span>
+                      {isCustom && (
+                        <span
+                          role="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveCustomAudience(aud);
+                          }}
+                          className={`ml-1.5 -mr-0.5 p-0.5 rounded-full transition-colors ${
+                            isSelected
+                              ? 'hover:bg-white/25 text-white/80 hover:text-white'
+                              : 'hover:bg-stone-200 text-stone-400 hover:text-stone-700'
+                          }`}
+                          title="Remove custom option"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </span>
+                      )}
                     </button>
                   );
                 })}
+
+                {/* Custom Audience Input or Add Button */}
+                {isAddingAudience ? (
+                  <div className="inline-flex items-center gap-1 bg-stone-50 border border-stone-300 rounded-lg px-2 py-0.5 focus-within:border-amber-600 focus-within:bg-white transition-all shadow-2xs">
+                    <input
+                      ref={audienceInputRef}
+                      type="text"
+                      value={customAudienceText}
+                      onChange={e => setCustomAudienceText(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomAudience();
+                        } else if (e.key === 'Escape') {
+                          setIsAddingAudience(false);
+                          setCustomAudienceText('');
+                        }
+                      }}
+                      placeholder="Custom audience..."
+                      className="bg-transparent text-xs text-stone-800 placeholder:text-stone-400 focus:outline-hidden w-28 sm:w-36 py-0.5"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCustomAudience}
+                      disabled={!customAudienceText.trim()}
+                      className="p-0.5 rounded text-stone-700 hover:text-stone-950 hover:bg-stone-200 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                      title="Add & select"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddingAudience(false);
+                        setCustomAudienceText('');
+                      }}
+                      className="p-0.5 rounded text-stone-400 hover:text-stone-700 hover:bg-stone-200 transition-colors"
+                      title="Cancel"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleStartAddAudience}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-all border border-dashed border-stone-300 text-stone-600 hover:text-stone-900 hover:border-stone-400 hover:bg-stone-50"
+                    title="Add custom target audience"
+                  >
+                    <Plus className="w-3 h-3 text-stone-500" />
+                    <span>Add Custom</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

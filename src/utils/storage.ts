@@ -1,4 +1,15 @@
-import { ImageProject, SavedConceptItem, InspirationReference, VisualProfile, SynthesisConcept, DirectionProfile, StructuredVisualDirection, StructuredVisualParameters } from '../types';
+import { 
+  ImageProject, 
+  SavedConceptItem, 
+  InspirationReference, 
+  VisualProfile, 
+  SynthesisConcept, 
+  DirectionProfile, 
+  StructuredVisualDirection, 
+  StructuredVisualParameters 
+} from '../types';
+import { collection, doc, setDoc, getDocs } from 'firebase/firestore';
+import { db, isFirebaseConfigured } from '../services/firebase';
 
 export const DEFAULT_PROMPT_INSTRUCTIONS = 
   "Translate the approved design brief into a precise, concrete image-generation prompt. Strictly describe the actual subject, composition, visual hierarchy, typography, illustration style, color palette, and production requirements specified in the brief. Never substitute the user's specific subject with generic stock scenes (such as gift boxes, generic packaging, or luxury product photos). Strictly prohibit generic filler phrases like '8k resolution', 'masterpiece', 'hyper-realistic', 'stunning', 'studio lighting', or arbitrary stock photography language unless explicitly required by the design brief.";
@@ -11,6 +22,19 @@ const STORAGE_KEYS = {
   SYNTHESIS_CONCEPTS: 'sog_synthesis_concepts_v2',
   DIRECTION_PROFILES: 'sog_direction_profiles_v1'
 };
+
+const FIRESTORE_COLLECTIONS = {
+  PROJECTS: 'image_projects',
+  SAVED_CONCEPTS: 'saved_concepts',
+  INSPIRATION_LIBRARY: 'inspiration_library',
+  VISUAL_PROFILES: 'visual_profiles',
+  SYNTHESIS_CONCEPTS: 'synthesis_concepts',
+  DIRECTION_PROFILES: 'direction_profiles'
+};
+
+function cleanForFirestore<T>(data: T): Record<string, any> {
+  return JSON.parse(JSON.stringify(data));
+}
 
 // Seed sample initial image project
 const SAMPLE_IMAGE_PROJECT: ImageProject = {
@@ -142,7 +166,7 @@ const SAMPLE_IMAGE_PROJECT: ImageProject = {
     visualHierarchy: 'Central specimen illustration leading to top accession tag and bottom Latin motto',
     parameters: {
       compositions: ['Centered', 'Balanced'],
-      framings: ['Framed', 'Badge'],
+      framings: ['Centered', 'Framed'],
       customComposition: 'Specimen plaque frame with formal border lines and accession labels',
       typographyFontCharacters: ['Slab Serif', 'Monospaced'],
       typographyRoles: ['Balanced'],
@@ -214,7 +238,7 @@ const SAMPLE_VISUAL_PROFILE: VisualProfile = {
 };
 
 // ==========================================
-// PERSISTENCE FUNCTIONS
+// PERSISTENCE FUNCTIONS WITH TOMBSTONES
 // ==========================================
 
 export function getImageProjects(): ImageProject[] {
@@ -228,8 +252,11 @@ export function getImageProjects(): ImageProject[] {
     const projects: ImageProject[] = JSON.parse(raw);
     if (!Array.isArray(projects)) return [SAMPLE_IMAGE_PROJECT];
 
+    // Filter out soft-deleted records
+    const activeProjects = projects.filter(p => !p.isDeleted);
+
     let hasMigration = false;
-    const result = projects.map(proj => {
+    const result = activeProjects.map(proj => {
       if (proj.visualDirection && !proj.visualDirection.parameters) {
         hasMigration = true;
         return {
@@ -244,10 +271,10 @@ export function getImageProjects(): ImageProject[] {
     });
 
     if (hasMigration) {
-      localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(result));
+      localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(projects));
     }
 
-    return result;
+    return result.length > 0 ? result : [SAMPLE_IMAGE_PROJECT];
   } catch (e) {
     console.error('Failed to load image projects:', e);
     return [SAMPLE_IMAGE_PROJECT];
@@ -256,103 +283,31 @@ export function getImageProjects(): ImageProject[] {
 
 export function saveImageProject(project: ImageProject): void {
   try {
-    const projects = getImageProjects();
-    const index = projects.findIndex(p => p.id === project.id);
-    const updatedProject = { ...project, updatedAt: new Date().toISOString() };
+    const raw = localStorage.getItem(STORAGE_KEYS.IMAGE_PROJECTS);
+    const allProjects: ImageProject[] = raw ? JSON.parse(raw) : [];
+    const index = allProjects.findIndex(p => p.id === project.id);
+    const updatedProject: ImageProject = { 
+      ...project, 
+      isDeleted: false,
+      updatedAt: new Date().toISOString() 
+    };
+
     if (index >= 0) {
-      projects[index] = updatedProject;
+      allProjects[index] = updatedProject;
     } else {
-      projects.unshift(updatedProject);
+      allProjects.unshift(updatedProject);
     }
     
     try {
-      localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(projects));
+      localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(allProjects));
     } catch (setItemError) {
-      if (
-        setItemError instanceof Error &&
-        (setItemError.name === 'QuotaExceededError' ||
-         setItemError.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
-         setItemError.message.toLowerCase().includes('quota') ||
-         setItemError.message.toLowerCase().includes('limit'))
-      ) {
-        console.warn('LocalStorage quota exceeded. Progressively pruning oldest project image reference data URLs...');
-        let saved = false;
+      console.warn('LocalStorage error saving project, continuing with Firestore sync:', setItemError);
+    }
 
-        // Loop through projects from oldest to newest
-        for (let pIndex = projects.length - 1; pIndex >= 0; pIndex--) {
-          const proj = projects[pIndex];
-          if (proj.id === project.id) {
-            continue; // Do not prune reference images of the project currently being edited and saved
-          }
-          if (proj.inspirationReferences) {
-            // Find references with images in this project and prune them
-            let prunedAny = false;
-            for (let refIndex = proj.inspirationReferences.length - 1; refIndex >= 0; refIndex--) {
-              const ref = proj.inspirationReferences[refIndex];
-              if (ref.imageDataUrl) {
-                console.log(`Pruning reference image data for project "${proj.title}" / ref "${ref.name}"`);
-                ref.imageDataUrl = undefined;
-                prunedAny = true;
-              }
-            }
-
-            if (prunedAny) {
-              try {
-                localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(projects));
-                saved = true;
-                console.log('Successfully saved image projects after pruning old reference image.');
-                break;
-              } catch (innerError) {
-                // Keep pruning other projects/references
-              }
-            }
-          }
-        }
-
-        if (!saved) {
-          // If still failing, try pruning old images from the global inspiration library!
-          console.warn('Pruning project images did not suffice. Progressively pruning oldest global inspiration library images...');
-          try {
-            const library = getInspirationLibrary();
-            for (let i = library.length - 1; i >= 0; i--) {
-              if (library[i].imageDataUrl) {
-                console.log(`Pruning global library image content to save space: ${library[i].name}`);
-                library[i].imageDataUrl = undefined;
-                try {
-                  localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(library));
-                  localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(projects));
-                  saved = true;
-                  console.log('Successfully saved image projects after pruning global library images.');
-                  break;
-                } catch (e) {
-                  // Continue pruning if it still fails
-                }
-              }
-            }
-          } catch (libError) {
-            console.error('Failed to prune global library images:', libError);
-          }
-        }
-
-        if (!saved) {
-          // If still failing, try deleting the oldest 2 projects completely
-          console.warn('Individual image pruning inside projects did not suffice. Deleting oldest projects...');
-          const prunedProjects = projects.slice(0, Math.max(1, projects.length - 2));
-          try {
-            localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(prunedProjects));
-            console.log('Saved image projects after deleting oldest projects.');
-            saved = true;
-          } catch (extremeError) {
-            console.error('Failed to save image projects even after extensive pruning:', extremeError);
-          }
-        }
-
-        if (!saved) {
-          throw new Error('Local Storage Full: Image references exceeded the 5MB browser quota. Please manually delete some old design references or projects to free up space.');
-        }
-      } else {
-        throw setItemError;
-      }
+    // Asynchronously write to Firestore
+    if (isFirebaseConfigured() && project.id) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.PROJECTS, project.id), cleanForFirestore(updatedProject), { merge: true })
+        .catch(err => console.warn('[Firestore] Project sync write failed:', err));
     }
   } catch (e) {
     console.error('Failed to save image project:', e);
@@ -362,8 +317,28 @@ export function saveImageProject(project: ImageProject): void {
 
 export function deleteImageProject(id: string): void {
   try {
-    const projects = getImageProjects().filter(p => p.id !== id);
-    localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(projects));
+    const raw = localStorage.getItem(STORAGE_KEYS.IMAGE_PROJECTS);
+    const allProjects: ImageProject[] = raw ? JSON.parse(raw) : [];
+    const now = new Date().toISOString();
+
+    // Mark as soft-deleted tombstone locally
+    const updated = allProjects.map(p => {
+      if (p.id === id) {
+        return { ...p, isDeleted: true, deletedAt: now, updatedAt: now };
+      }
+      return p;
+    });
+    localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(updated));
+
+    // Asynchronously update Firestore tombstone
+    if (isFirebaseConfigured() && id) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.PROJECTS, id), {
+        id,
+        isDeleted: true,
+        deletedAt: now,
+        updatedAt: now
+      }, { merge: true }).catch(err => console.warn('[Firestore] Project soft delete write failed:', err));
+    }
   } catch (e) {
     console.error('Failed to delete image project:', e);
   }
@@ -379,7 +354,10 @@ export function getSavedConcepts(): SavedConceptItem[] {
       localStorage.setItem(STORAGE_KEYS.SAVED_CONCEPTS, JSON.stringify(initial));
       return initial;
     }
-    return JSON.parse(raw);
+    const concepts: SavedConceptItem[] = JSON.parse(raw);
+    if (!Array.isArray(concepts)) return [SAMPLE_SAVED_CONCEPT];
+    // Filter out soft-deleted records
+    return concepts.filter(c => !c.isDeleted);
   } catch (e) {
     console.error('Failed to load saved concepts:', e);
     return [SAMPLE_SAVED_CONCEPT];
@@ -388,18 +366,30 @@ export function getSavedConcepts(): SavedConceptItem[] {
 
 export function saveConceptToGallery(item: SavedConceptItem): void {
   try {
-    const concepts = getSavedConcepts();
-    const index = concepts.findIndex(c => 
+    const raw = localStorage.getItem(STORAGE_KEYS.SAVED_CONCEPTS);
+    const allConcepts: SavedConceptItem[] = raw ? JSON.parse(raw) : [];
+    const updatedItem: SavedConceptItem = {
+      ...item,
+      isDeleted: false
+    };
+
+    const index = allConcepts.findIndex(c => 
       (item.id && c.id === item.id) || 
       (item.concept?.id && c.concept?.id && c.concept.id === item.concept.id) ||
       (item.concept?.conceptName && c.concept?.conceptName && c.concept.conceptName === item.concept.conceptName)
     );
     if (index >= 0) {
-      concepts[index] = item;
+      allConcepts[index] = updatedItem;
     } else {
-      concepts.unshift(item);
+      allConcepts.unshift(updatedItem);
     }
-    localStorage.setItem(STORAGE_KEYS.SAVED_CONCEPTS, JSON.stringify(concepts));
+    localStorage.setItem(STORAGE_KEYS.SAVED_CONCEPTS, JSON.stringify(allConcepts));
+
+    // Asynchronously write to Firestore
+    if (isFirebaseConfigured() && item.id) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.SAVED_CONCEPTS, item.id), cleanForFirestore(updatedItem), { merge: true })
+        .catch(err => console.warn('[Firestore] Saved concept sync write failed:', err));
+    }
   } catch (e) {
     console.error('Failed to save concept:', e);
     throw e;
@@ -408,12 +398,33 @@ export function saveConceptToGallery(item: SavedConceptItem): void {
 
 export function removeSavedConcept(id: string, name?: string): void {
   try {
-    const concepts = getSavedConcepts().filter(c => {
+    const raw = localStorage.getItem(STORAGE_KEYS.SAVED_CONCEPTS);
+    const allConcepts: SavedConceptItem[] = raw ? JSON.parse(raw) : [];
+    const now = new Date().toISOString();
+
+    const target = allConcepts.find(c => {
       const matchId = id && (c.id === id || c.concept?.id === id);
       const matchName = name && c.concept?.conceptName === name;
-      return !matchId && !matchName;
+      return matchId || matchName;
     });
-    localStorage.setItem(STORAGE_KEYS.SAVED_CONCEPTS, JSON.stringify(concepts));
+
+    const updated = allConcepts.map(c => {
+      const matchId = id && (c.id === id || c.concept?.id === id);
+      const matchName = name && c.concept?.conceptName === name;
+      if (matchId || matchName) {
+        return { ...c, isDeleted: true, deletedAt: now };
+      }
+      return c;
+    });
+    localStorage.setItem(STORAGE_KEYS.SAVED_CONCEPTS, JSON.stringify(updated));
+
+    if (isFirebaseConfigured() && target?.id) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.SAVED_CONCEPTS, target.id), {
+        id: target.id,
+        isDeleted: true,
+        deletedAt: now
+      }, { merge: true }).catch(err => console.warn('[Firestore] Saved concept soft delete failed:', err));
+    }
   } catch (e) {
     console.error('Failed to remove saved concept:', e);
     throw e;
@@ -430,7 +441,10 @@ export function getInspirationLibrary(): InspirationReference[] {
       localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(initial));
       return initial;
     }
-    return JSON.parse(raw);
+    const library: InspirationReference[] = JSON.parse(raw);
+    if (!Array.isArray(library)) return [];
+    // Filter out soft-deleted records
+    return library.filter(i => !i.isDeleted);
   } catch (e) {
     console.error('Failed to load inspiration library:', e);
     return [];
@@ -439,63 +453,31 @@ export function getInspirationLibrary(): InspirationReference[] {
 
 export function saveInspirationItem(item: InspirationReference): void {
   try {
-    const library = getInspirationLibrary();
-    const index = library.findIndex(i => i.id === item.id);
+    const raw = localStorage.getItem(STORAGE_KEYS.INSPIRATION_LIBRARY);
+    const allLibrary: InspirationReference[] = raw ? JSON.parse(raw) : [];
+    const updatedItem: InspirationReference = {
+      ...item,
+      isDeleted: false,
+      updatedAt: new Date().toISOString()
+    };
+
+    const index = allLibrary.findIndex(i => i.id === item.id);
     if (index >= 0) {
-      library[index] = item;
+      allLibrary[index] = updatedItem;
     } else {
-      library.unshift(item);
+      allLibrary.unshift(updatedItem);
     }
     
     try {
-      localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(library));
+      localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(allLibrary));
     } catch (setItemError) {
-      // Check if it's a quota exceeded error
-      if (
-        setItemError instanceof Error &&
-        (setItemError.name === 'QuotaExceededError' ||
-         setItemError.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
-         setItemError.message.toLowerCase().includes('quota') ||
-         setItemError.message.toLowerCase().includes('limit'))
-      ) {
-        console.warn('LocalStorage quota exceeded. Progressively pruning oldest inspiration image data URLs...');
-        let saved = false;
-        
-        // Loop from oldest to newest, clearing imageDataUrl to reclaim space
-        for (let i = library.length - 1; i >= 0; i--) {
-          if (library[i].id === item.id) {
-            continue; // Do not prune the reference currently being saved
-          }
-          if (library[i].imageDataUrl) {
-            console.log(`Pruning image content for older reference to save space: ${library[i].name}`);
-            library[i].imageDataUrl = undefined;
-            
-            try {
-              localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(library));
-              saved = true;
-              console.log('Successfully saved inspiration library after pruning old image.');
-              break;
-            } catch (innerError) {
-              // Continue pruning if it still fails
-            }
-          }
-        }
-        
-        if (!saved) {
-          // If still fails, try deleting the 3 oldest items entirely
-          console.warn('Pruning individual images did not suffice. Deleting oldest references entirely...');
-          const prunedLibrary = library.slice(0, Math.max(3, library.length - 3));
-          try {
-            localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(prunedLibrary));
-            console.log('Saved inspiration library after pruning oldest references.');
-          } catch (extremeError) {
-            console.error('Failed to save inspiration library even after extensive pruning:', extremeError);
-            throw extremeError;
-          }
-        }
-      } else {
-        throw setItemError;
-      }
+      console.warn('LocalStorage error on inspiration item, continuing:', setItemError);
+    }
+
+    // Asynchronously write to Firestore
+    if (isFirebaseConfigured() && item.id) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.INSPIRATION_LIBRARY, item.id), cleanForFirestore(updatedItem), { merge: true })
+        .catch(err => console.warn('[Firestore] Inspiration item sync write failed:', err));
     }
   } catch (e) {
     console.error('Failed to save inspiration item:', e);
@@ -505,8 +487,26 @@ export function saveInspirationItem(item: InspirationReference): void {
 
 export function deleteInspirationItem(id: string): void {
   try {
-    const library = getInspirationLibrary().filter(i => i.id !== id);
-    localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(library));
+    const raw = localStorage.getItem(STORAGE_KEYS.INSPIRATION_LIBRARY);
+    const allLibrary: InspirationReference[] = raw ? JSON.parse(raw) : [];
+    const now = new Date().toISOString();
+
+    const updated = allLibrary.map(i => {
+      if (i.id === id) {
+        return { ...i, isDeleted: true, deletedAt: now, updatedAt: now };
+      }
+      return i;
+    });
+    localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(updated));
+
+    if (isFirebaseConfigured() && id) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.INSPIRATION_LIBRARY, id), {
+        id,
+        isDeleted: true,
+        deletedAt: now,
+        updatedAt: now
+      }, { merge: true }).catch(err => console.warn('[Firestore] Inspiration item soft delete failed:', err));
+    }
   } catch (e) {
     console.error('Failed to delete inspiration item:', e);
   }
@@ -539,7 +539,7 @@ export function getAggregateVisualProfile(): {
   productPreferences: string[];
   contributingInspirations: InspirationReference[];
 } {
-  const library = getInspirationLibrary().filter(i => i.inVisualProfile && i.analysis);
+  const library = getInspirationLibrary().filter(i => i.inVisualProfile && i.analysis && !i.isDeleted);
 
   const compositionsSet = new Set<string>();
   const typoSet = new Set<string>();
@@ -588,7 +588,10 @@ export function getVisualProfiles(): VisualProfile[] {
       localStorage.setItem(STORAGE_KEYS.VISUAL_PROFILES, JSON.stringify(initial));
       return initial;
     }
-    return JSON.parse(raw);
+    const profiles: VisualProfile[] = JSON.parse(raw);
+    if (!Array.isArray(profiles)) return [SAMPLE_VISUAL_PROFILE];
+    // Filter out soft-deleted records
+    return profiles.filter(vp => !vp.isDeleted);
   } catch (e) {
     console.error('Failed to load visual profiles:', e);
     return [SAMPLE_VISUAL_PROFILE];
@@ -597,14 +600,26 @@ export function getVisualProfiles(): VisualProfile[] {
 
 export function saveVisualProfile(profile: VisualProfile): void {
   try {
-    const profiles = getVisualProfiles();
-    const index = profiles.findIndex(p => p.id === profile.id);
+    const raw = localStorage.getItem(STORAGE_KEYS.VISUAL_PROFILES);
+    const allProfiles: VisualProfile[] = raw ? JSON.parse(raw) : [];
+    const updatedProfile: VisualProfile = {
+      ...profile,
+      isDeleted: false
+    };
+
+    const index = allProfiles.findIndex(p => p.id === profile.id);
     if (index >= 0) {
-      profiles[index] = profile;
+      allProfiles[index] = updatedProfile;
     } else {
-      profiles.unshift(profile);
+      allProfiles.unshift(updatedProfile);
     }
-    localStorage.setItem(STORAGE_KEYS.VISUAL_PROFILES, JSON.stringify(profiles));
+    localStorage.setItem(STORAGE_KEYS.VISUAL_PROFILES, JSON.stringify(allProfiles));
+
+    // Asynchronously write to Firestore
+    if (isFirebaseConfigured() && profile.id) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.VISUAL_PROFILES, profile.id), cleanForFirestore(updatedProfile), { merge: true })
+        .catch(err => console.warn('[Firestore] Visual profile sync write failed:', err));
+    }
   } catch (e) {
     console.error('Failed to save visual profile:', e);
   }
@@ -612,8 +627,25 @@ export function saveVisualProfile(profile: VisualProfile): void {
 
 export function deleteVisualProfile(id: string): void {
   try {
-    const profiles = getVisualProfiles().filter(p => p.id !== id);
-    localStorage.setItem(STORAGE_KEYS.VISUAL_PROFILES, JSON.stringify(profiles));
+    const raw = localStorage.getItem(STORAGE_KEYS.VISUAL_PROFILES);
+    const allProfiles: VisualProfile[] = raw ? JSON.parse(raw) : [];
+    const now = new Date().toISOString();
+
+    const updated = allProfiles.map(p => {
+      if (p.id === id) {
+        return { ...p, isDeleted: true, deletedAt: now };
+      }
+      return p;
+    });
+    localStorage.setItem(STORAGE_KEYS.VISUAL_PROFILES, JSON.stringify(updated));
+
+    if (isFirebaseConfigured() && id) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.VISUAL_PROFILES, id), {
+        id,
+        isDeleted: true,
+        deletedAt: now
+      }, { merge: true }).catch(err => console.warn('[Firestore] Visual profile soft delete failed:', err));
+    }
   } catch (e) {
     console.error('Failed to delete visual profile:', e);
   }
@@ -670,7 +702,10 @@ export function getSynthesisConcepts(): SynthesisConcept[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.SYNTHESIS_CONCEPTS);
     if (!raw) return [];
-    return JSON.parse(raw);
+    const concepts: SynthesisConcept[] = JSON.parse(raw);
+    if (!Array.isArray(concepts)) return [];
+    // Filter out soft-deleted records
+    return concepts.filter(c => !c.isDeleted);
   } catch (e) {
     console.error('Failed to load synthesis concepts:', e);
     return [];
@@ -679,14 +714,25 @@ export function getSynthesisConcepts(): SynthesisConcept[] {
 
 export function saveSynthesisConcept(concept: SynthesisConcept): void {
   try {
-    const concepts = getSynthesisConcepts();
-    const index = concepts.findIndex(c => c.id === concept.id);
+    const raw = localStorage.getItem(STORAGE_KEYS.SYNTHESIS_CONCEPTS);
+    const allConcepts: SynthesisConcept[] = raw ? JSON.parse(raw) : [];
+    const updatedConcept: SynthesisConcept = {
+      ...concept,
+      isDeleted: false
+    };
+
+    const index = allConcepts.findIndex(c => c.id === concept.id);
     if (index >= 0) {
-      concepts[index] = concept;
+      allConcepts[index] = updatedConcept;
     } else {
-      concepts.unshift(concept);
+      allConcepts.unshift(updatedConcept);
     }
-    localStorage.setItem(STORAGE_KEYS.SYNTHESIS_CONCEPTS, JSON.stringify(concepts));
+    localStorage.setItem(STORAGE_KEYS.SYNTHESIS_CONCEPTS, JSON.stringify(allConcepts));
+
+    if (isFirebaseConfigured() && concept.id) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.SYNTHESIS_CONCEPTS, concept.id), cleanForFirestore(updatedConcept), { merge: true })
+        .catch(err => console.warn('[Firestore] Synthesis concept sync write failed:', err));
+    }
   } catch (e) {
     console.error('Failed to save synthesis concept:', e);
   }
@@ -694,8 +740,25 @@ export function saveSynthesisConcept(concept: SynthesisConcept): void {
 
 export function deleteSynthesisConcept(id: string): void {
   try {
-    const concepts = getSynthesisConcepts().filter(c => c.id !== id);
-    localStorage.setItem(STORAGE_KEYS.SYNTHESIS_CONCEPTS, JSON.stringify(concepts));
+    const raw = localStorage.getItem(STORAGE_KEYS.SYNTHESIS_CONCEPTS);
+    const allConcepts: SynthesisConcept[] = raw ? JSON.parse(raw) : [];
+    const now = new Date().toISOString();
+
+    const updated = allConcepts.map(c => {
+      if (c.id === id) {
+        return { ...c, isDeleted: true, deletedAt: now };
+      }
+      return c;
+    });
+    localStorage.setItem(STORAGE_KEYS.SYNTHESIS_CONCEPTS, JSON.stringify(updated));
+
+    if (isFirebaseConfigured() && id) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.SYNTHESIS_CONCEPTS, id), {
+        id,
+        isDeleted: true,
+        deletedAt: now
+      }, { merge: true }).catch(err => console.warn('[Firestore] Synthesis concept soft delete failed:', err));
+    }
   } catch (e) {
     console.error('Failed to delete synthesis concept:', e);
   }
@@ -934,7 +997,6 @@ export function ensureProfileParameters(profile: DirectionProfile): DirectionPro
       cloned.visualDirection.parameters = synthesizeParametersFromDirection(cloned.visualDirection);
     }
   } else {
-    // If it's a default profile, ensure it has all structured fields populated
     if (defaultMatch && defaultMatch.visualDirection.parameters) {
       cloned.visualDirection.parameters = {
         ...JSON.parse(JSON.stringify(defaultMatch.visualDirection.parameters)),
@@ -972,8 +1034,8 @@ export function getDirectionProfiles(): DirectionProfile[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      // Ensure all profiles are deep-cloned and normalized with complete parameters
-      return parsed.map(ensureProfileParameters);
+      // Filter out soft-deleted records and normalize
+      return parsed.filter((p: DirectionProfile) => !p.isDeleted).map(ensureProfileParameters);
     }
     return JSON.parse(JSON.stringify(DEFAULT_DIRECTION_PROFILES));
   } catch (e) {
@@ -984,19 +1046,27 @@ export function getDirectionProfiles(): DirectionProfile[] {
 
 export function saveDirectionProfile(profile: DirectionProfile): void {
   try {
-    const profiles = getDirectionProfiles();
-    const index = profiles.findIndex(p => p.id === profile.id);
+    const raw = localStorage.getItem(STORAGE_KEYS.DIRECTION_PROFILES);
+    const allProfiles: DirectionProfile[] = raw ? JSON.parse(raw) : JSON.parse(JSON.stringify(DEFAULT_DIRECTION_PROFILES));
     const sanitized = ensureProfileParameters(profile);
-    const updatedProfile = { 
+    const updatedProfile: DirectionProfile = { 
       ...JSON.parse(JSON.stringify(sanitized)), 
+      isDeleted: false,
       updatedAt: new Date().toISOString() 
     };
+
+    const index = allProfiles.findIndex(p => p.id === profile.id);
     if (index >= 0) {
-      profiles[index] = updatedProfile;
+      allProfiles[index] = updatedProfile;
     } else {
-      profiles.unshift(updatedProfile);
+      allProfiles.unshift(updatedProfile);
     }
-    localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(profiles));
+    localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(allProfiles));
+
+    if (isFirebaseConfigured() && profile.id) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.DIRECTION_PROFILES, profile.id), cleanForFirestore(updatedProfile), { merge: true })
+        .catch(err => console.warn('[Firestore] Direction profile sync write failed:', err));
+    }
   } catch (e) {
     console.error('Failed to save direction profile:', e);
   }
@@ -1004,11 +1074,144 @@ export function saveDirectionProfile(profile: DirectionProfile): void {
 
 export function deleteDirectionProfile(id: string): void {
   try {
-    const profiles = getDirectionProfiles().filter(p => p.id !== id);
-    localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(profiles));
+    const raw = localStorage.getItem(STORAGE_KEYS.DIRECTION_PROFILES);
+    const allProfiles: DirectionProfile[] = raw ? JSON.parse(raw) : JSON.parse(JSON.stringify(DEFAULT_DIRECTION_PROFILES));
+    const now = new Date().toISOString();
+
+    const updated = allProfiles.map(p => {
+      if (p.id === id) {
+        return { ...p, isDeleted: true, deletedAt: now, updatedAt: now };
+      }
+      return p;
+    });
+    localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(updated));
+
+    if (isFirebaseConfigured() && id) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.DIRECTION_PROFILES, id), {
+        id,
+        isDeleted: true,
+        deletedAt: now,
+        updatedAt: now
+      }, { merge: true }).catch(err => console.warn('[Firestore] Direction profile soft delete failed:', err));
+    }
   } catch (e) {
     console.error('Failed to delete direction profile:', e);
   }
 }
+
+// ==========================================
+// CLOUD SYNCHRONIZATION WITH TOMBSTONES
+// ==========================================
+
+async function syncCollection<T extends { id: string; updatedAt?: string; createdAt?: string; isDeleted?: boolean; deletedAt?: string }>(
+  collectionName: string,
+  storageKey: string
+): Promise<void> {
+  try {
+    const colRef = collection(db, collectionName);
+    const snap = await getDocs(colRef);
+    if (snap.empty) return;
+
+    const rawLocal = localStorage.getItem(storageKey);
+    let localList: T[] = rawLocal ? JSON.parse(rawLocal) : [];
+    if (!Array.isArray(localList)) localList = [];
+
+    const localMap = new Map<string, T>();
+    localList.forEach(item => {
+      if (item && item.id) localMap.set(item.id, item);
+    });
+
+    snap.docs.forEach(docSnap => {
+      const cloudItem = docSnap.data() as T;
+      const id = cloudItem.id || docSnap.id;
+      if (!id) return;
+      cloudItem.id = id;
+
+      const localItem = localMap.get(id);
+
+      if (!localItem) {
+        // Document not locally present
+        localMap.set(id, cloudItem);
+      } else {
+        // Both exist: check tombstone status and timestamps
+        if (cloudItem.isDeleted) {
+          // Cloud marked as deleted tombstone
+          localMap.set(id, { ...localItem, ...cloudItem, isDeleted: true });
+        } else if (localItem.isDeleted) {
+          // Local is deleted: if local deletion happened after cloud update, keep deleted
+          const localDelTime = localItem.deletedAt ? new Date(localItem.deletedAt).getTime() : 0;
+          const cloudUpdateTime = cloudItem.updatedAt ? new Date(cloudItem.updatedAt).getTime() : 0;
+          if (localDelTime >= cloudUpdateTime) {
+            localMap.set(id, localItem);
+          } else {
+            // Cloud updated after local deletion: accept newer remote version
+            localMap.set(id, cloudItem);
+          }
+        } else {
+          // Neither is deleted: take newer record
+          const localTime = new Date(localItem.updatedAt || localItem.createdAt || 0).getTime();
+          const cloudTime = new Date(cloudItem.updatedAt || cloudItem.createdAt || 0).getTime();
+          if (cloudTime >= localTime) {
+            localMap.set(id, cloudItem);
+          }
+        }
+      }
+    });
+
+    const merged = Array.from(localMap.values());
+    localStorage.setItem(storageKey, JSON.stringify(merged));
+  } catch (err) {
+    console.warn(`[Storage Sync] Notice syncing collection '${collectionName}':`, err);
+  }
+}
+
+/**
+ * Fetches collections from Firestore on app load.
+ * Merges cloud data into the local cache and honors tombstoning (isDeleted: true).
+ */
+export async function syncDataFromCloud(): Promise<{
+  projectsCount: number;
+  conceptsCount: number;
+  inspirationsCount: number;
+  profilesCount: number;
+  synthesisCount: number;
+  directionsCount: number;
+}> {
+  if (!isFirebaseConfigured()) {
+    console.log('[Storage Sync] Firebase not configured with credentials; maintaining local persistence.');
+    return {
+      projectsCount: getImageProjects().length,
+      conceptsCount: getSavedConcepts().length,
+      inspirationsCount: getInspirationLibrary().length,
+      profilesCount: getVisualProfiles().length,
+      synthesisCount: getSynthesisConcepts().length,
+      directionsCount: getDirectionProfiles().length
+    };
+  }
+
+  try {
+    await Promise.allSettled([
+      syncCollection<ImageProject>(FIRESTORE_COLLECTIONS.PROJECTS, STORAGE_KEYS.IMAGE_PROJECTS),
+      syncCollection<SavedConceptItem>(FIRESTORE_COLLECTIONS.SAVED_CONCEPTS, STORAGE_KEYS.SAVED_CONCEPTS),
+      syncCollection<InspirationReference>(FIRESTORE_COLLECTIONS.INSPIRATION_LIBRARY, STORAGE_KEYS.INSPIRATION_LIBRARY),
+      syncCollection<VisualProfile>(FIRESTORE_COLLECTIONS.VISUAL_PROFILES, STORAGE_KEYS.VISUAL_PROFILES),
+      syncCollection<SynthesisConcept>(FIRESTORE_COLLECTIONS.SYNTHESIS_CONCEPTS, STORAGE_KEYS.SYNTHESIS_CONCEPTS),
+      syncCollection<DirectionProfile>(FIRESTORE_COLLECTIONS.DIRECTION_PROFILES, STORAGE_KEYS.DIRECTION_PROFILES)
+    ]);
+    console.log('[Storage Sync] Firestore synchronization completed.');
+  } catch (err) {
+    console.warn('[Storage Sync] Firestore sync completed with notice:', err);
+  }
+
+  return {
+    projectsCount: getImageProjects().length,
+    conceptsCount: getSavedConcepts().length,
+    inspirationsCount: getInspirationLibrary().length,
+    profilesCount: getVisualProfiles().length,
+    synthesisCount: getSynthesisConcepts().length,
+    directionsCount: getDirectionProfiles().length
+  };
+}
+
 export const exportData = exportAllData;
 export const importData = importAllData;

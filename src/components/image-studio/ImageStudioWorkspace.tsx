@@ -220,7 +220,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       const target = e.target as HTMLElement;
-      if (target && target.tagName === 'TEXTAREA') {
+      if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT')) {
         return;
       }
       if (isGenerating) return;

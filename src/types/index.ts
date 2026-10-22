@@ -99,6 +99,8 @@ export interface InspirationReference {
   inVisualProfile?: boolean;
   createdAt: string;
   updatedAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export interface SelectedCharacteristic {
@@ -200,6 +202,8 @@ export interface ImageProject {
   modelNotes?: string;
 
   visualCharacteristics?: Record<string, string>;
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export interface SavedConceptItem {
@@ -210,6 +214,8 @@ export interface SavedConceptItem {
   tags: string[];
   notes?: string;
   createdAt: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export interface VisualProfile {
@@ -224,6 +230,8 @@ export interface VisualProfile {
   avoidList: string[];
   isDefault?: boolean;
   createdAt: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export interface SynthesisConcept {
@@ -244,6 +252,8 @@ export interface SynthesisConcept {
   extractedPrinciplesUsed: string[];
   createdAt: string;
   modelUsed?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export interface AggregateVisualProfile {
@@ -271,6 +281,8 @@ export interface DirectionProfile {
   creativeDirection?: string;
   createdAt: string;
   updatedAt: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export type ReferenceAnalysis = InspirationAnalysisRecord;

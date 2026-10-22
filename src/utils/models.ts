@@ -65,7 +65,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
   }
 ];
 
-export const DEFAULT_MODEL_ID = 'gemini-3.5-flash';
+export const DEFAULT_MODEL_ID = 'gemini-3.5-flash-lite';
 
 const GLOBAL_MODEL_STORAGE_KEY = 'sog_global_default_model_v1';
 
@@ -91,7 +91,7 @@ export function setGlobalDefaultModel(modelId: string): void {
 
 export function getModelConfig(modelId?: string): ModelConfig {
   if (!modelId) {
-    return AVAILABLE_MODELS.find(m => m.id === DEFAULT_MODEL_ID) || AVAILABLE_MODELS[3];
+    return AVAILABLE_MODELS.find(m => m.id === DEFAULT_MODEL_ID) || AVAILABLE_MODELS[4];
   }
   const found = AVAILABLE_MODELS.find(m => m.id === modelId);
   if (found) return found;
@@ -108,5 +108,5 @@ export function getModelConfig(modelId?: string): ModelConfig {
     };
   }
 
-  return AVAILABLE_MODELS.find(m => m.id === DEFAULT_MODEL_ID) || AVAILABLE_MODELS[3];
+  return AVAILABLE_MODELS.find(m => m.id === DEFAULT_MODEL_ID) || AVAILABLE_MODELS[4];
 }

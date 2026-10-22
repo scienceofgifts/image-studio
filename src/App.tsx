@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MainView, ImageProject, SavedConceptItem, InspirationReference, SynthesisConcept, IdeaExplorerIdea } from './types';
-import { getImageProjects, saveImageProject, DEFAULT_PROMPT_INSTRUCTIONS } from './utils/storage';
+import { getImageProjects, saveImageProject, syncDataFromCloud, DEFAULT_PROMPT_INSTRUCTIONS } from './utils/storage';
 import { Navigation } from './components/Navigation';
 import { ImageStudioWorkspace } from './components/image-studio/ImageStudioWorkspace';
 import { GalleryView } from './components/gallery/GalleryView';
@@ -10,7 +10,7 @@ import { IdeaExplorerWorkspace } from './components/idea-explorer/IdeaExplorerWo
 import { LegacyPromptGenerator } from './components/image-studio/LegacyPromptGenerator';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { NewProjectModal } from './components/common/NewProjectModal';
-import { FolderKanban, Plus, Sparkles, LayoutGrid, Image as ImageIcon, Sliders, ArrowRight } from 'lucide-react';
+import { FolderKanban, Plus, Sparkles, LayoutGrid, Image as ImageIcon, Sliders, ArrowRight, RefreshCw } from 'lucide-react';
 
 import { handleGlobalEscapeKey, useOverlay } from './utils/overlayManager';
 import { getApiUrl } from './services/apiConfig';
@@ -47,6 +47,8 @@ export default function App() {
   useOverlay(isSettingsOpen, () => setIsSettingsOpen(false), 'app-settings-modal');
   useOverlay(isNewProjectModalOpen, () => setIsNewProjectModalOpen(false), 'app-new-project-modal');
 
+  const [isSyncing, setIsSyncing] = useState(false);
+
   const refreshData = () => {
     const loaded = getImageProjects();
     setProjects(loaded);
@@ -56,7 +58,25 @@ export default function App() {
   };
 
   useEffect(() => {
-    refreshData();
+    let isMounted = true;
+    const initData = async () => {
+      refreshData();
+      setIsSyncing(true);
+      try {
+        await syncDataFromCloud();
+      } catch (err) {
+        console.warn('Initial cloud sync notice:', err);
+      } finally {
+        if (isMounted) {
+          setIsSyncing(false);
+          refreshData();
+        }
+      }
+    };
+    initData();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const handleOpenProject = (id: string, step = 'idea') => {
@@ -368,6 +388,14 @@ export default function App() {
         initialSavedConcept={initialConceptForNewProj}
         initialInspirationRef={initialInspForNewProj}
       />
+
+      {/* Cloud Sync Status Indicator */}
+      {isSyncing && (
+        <div className="fixed bottom-4 right-4 z-50 bg-stone-900/90 backdrop-blur-xs text-stone-100 px-3.5 py-2 rounded-xl shadow-lg border border-stone-700/80 flex items-center gap-2.5 text-xs animate-fadeIn">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+          <span>Syncing data...</span>
+        </div>
+      )}
     </div>
   );
 }
