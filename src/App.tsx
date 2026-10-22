@@ -108,10 +108,12 @@ export default function App() {
 
   const handleSignIn = async () => {
     try {
-      await signInWithGoogle();
-      await handleManualSync();
+      const user = await signInWithGoogle();
+      if (user) {
+        await handleManualSync();
+      }
     } catch (err) {
-      console.error('Sign in error:', err);
+      console.warn('Sign in notice:', err);
     }
   };
 

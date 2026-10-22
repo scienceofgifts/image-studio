@@ -1107,10 +1107,11 @@ async function syncCollection<T extends { id: string; updatedAt?: string; create
   collectionName: string,
   storageKey: string
 ): Promise<void> {
+  if (!isFirebaseConfigured()) return;
+
   try {
     const colRef = collection(db, collectionName);
     const snap = await getDocs(colRef);
-    if (snap.empty) return;
 
     const rawLocal = localStorage.getItem(storageKey);
     let localList: T[] = rawLocal ? JSON.parse(rawLocal) : [];
@@ -1121,45 +1122,55 @@ async function syncCollection<T extends { id: string; updatedAt?: string; create
       if (item && item.id) localMap.set(item.id, item);
     });
 
+    const cloudMap = new Map<string, T>();
     snap.docs.forEach(docSnap => {
       const cloudItem = docSnap.data() as T;
       const id = cloudItem.id || docSnap.id;
-      if (!id) return;
-      cloudItem.id = id;
+      if (id) {
+        cloudItem.id = id;
+        cloudMap.set(id, cloudItem);
+      }
+    });
 
+    const allIds = new Set<string>([...Array.from(localMap.keys()), ...Array.from(cloudMap.keys())]);
+    const mergedMap = new Map<string, T>();
+    const uploadPromises: Promise<void>[] = [];
+
+    allIds.forEach(id => {
       const localItem = localMap.get(id);
+      const cloudItem = cloudMap.get(id);
 
-      if (!localItem) {
-        // Document not locally present
-        localMap.set(id, cloudItem);
-      } else {
-        // Both exist: check tombstone status and timestamps
-        if (cloudItem.isDeleted) {
-          // Cloud marked as deleted tombstone
-          localMap.set(id, { ...localItem, ...cloudItem, isDeleted: true });
-        } else if (localItem.isDeleted) {
-          // Local is deleted: if local deletion happened after cloud update, keep deleted
-          const localDelTime = localItem.deletedAt ? new Date(localItem.deletedAt).getTime() : 0;
-          const cloudUpdateTime = cloudItem.updatedAt ? new Date(cloudItem.updatedAt).getTime() : 0;
-          if (localDelTime >= cloudUpdateTime) {
-            localMap.set(id, localItem);
-          } else {
-            // Cloud updated after local deletion: accept newer remote version
-            localMap.set(id, cloudItem);
-          }
+      if (localItem && !cloudItem) {
+        // Local only -> keep local & upload to cloud
+        mergedMap.set(id, localItem);
+        uploadPromises.push(
+          setDoc(doc(db, collectionName, id), cleanForFirestore(localItem), { merge: true })
+            .catch(err => console.warn(`[Sync Upload Notice] ${collectionName}/${id}:`, err))
+        );
+      } else if (!localItem && cloudItem) {
+        // Cloud only -> save locally
+        mergedMap.set(id, cloudItem);
+      } else if (localItem && cloudItem) {
+        // Both exist: compare timestamps
+        const localTime = new Date(localItem.updatedAt || localItem.createdAt || localItem.deletedAt || 0).getTime();
+        const cloudTime = new Date(cloudItem.updatedAt || cloudItem.createdAt || cloudItem.deletedAt || 0).getTime();
+
+        if (localTime > cloudTime) {
+          mergedMap.set(id, localItem);
+          uploadPromises.push(
+            setDoc(doc(db, collectionName, id), cleanForFirestore(localItem), { merge: true })
+              .catch(err => console.warn(`[Sync Update Notice] ${collectionName}/${id}:`, err))
+          );
         } else {
-          // Neither is deleted: take newer record
-          const localTime = new Date(localItem.updatedAt || localItem.createdAt || 0).getTime();
-          const cloudTime = new Date(cloudItem.updatedAt || cloudItem.createdAt || 0).getTime();
-          if (cloudTime >= localTime) {
-            localMap.set(id, cloudItem);
-          }
+          mergedMap.set(id, cloudItem);
         }
       }
     });
 
-    const merged = Array.from(localMap.values());
-    localStorage.setItem(storageKey, JSON.stringify(merged));
+    await Promise.allSettled(uploadPromises);
+
+    const mergedList = Array.from(mergedMap.values());
+    localStorage.setItem(storageKey, JSON.stringify(mergedList));
   } catch (err) {
     console.warn(`[Storage Sync] Notice syncing collection '${collectionName}':`, err);
   }
@@ -1167,7 +1178,7 @@ async function syncCollection<T extends { id: string; updatedAt?: string; create
 
 /**
  * Fetches collections from Firestore on app load.
- * Merges cloud data into the local cache and honors tombstoning (isDeleted: true).
+ * Bi-directionally syncs all studio and idea explorer data with Firestore.
  */
 export async function syncDataFromCloud(): Promise<{
   projectsCount: number;
@@ -1178,7 +1189,7 @@ export async function syncDataFromCloud(): Promise<{
   directionsCount: number;
 }> {
   if (!isFirebaseConfigured()) {
-    console.log('[Storage Sync] Firebase not configured with credentials; maintaining local persistence.');
+    console.log('[Storage Sync] Firebase not configured; maintaining local persistence.');
     return {
       projectsCount: getImageProjects().length,
       conceptsCount: getSavedConcepts().length,
@@ -1196,11 +1207,15 @@ export async function syncDataFromCloud(): Promise<{
       syncCollection<InspirationReference>(FIRESTORE_COLLECTIONS.INSPIRATION_LIBRARY, STORAGE_KEYS.INSPIRATION_LIBRARY),
       syncCollection<VisualProfile>(FIRESTORE_COLLECTIONS.VISUAL_PROFILES, STORAGE_KEYS.VISUAL_PROFILES),
       syncCollection<SynthesisConcept>(FIRESTORE_COLLECTIONS.SYNTHESIS_CONCEPTS, STORAGE_KEYS.SYNTHESIS_CONCEPTS),
-      syncCollection<DirectionProfile>(FIRESTORE_COLLECTIONS.DIRECTION_PROFILES, STORAGE_KEYS.DIRECTION_PROFILES)
+      syncCollection<DirectionProfile>(FIRESTORE_COLLECTIONS.DIRECTION_PROFILES, STORAGE_KEYS.DIRECTION_PROFILES),
+      syncCollection<any>('idea_explorer_sessions', 'scienceOfGifts.ideaExplorer.v1.sessions'),
+      syncCollection<any>('idea_explorer_batches', 'scienceOfGifts.ideaExplorer.v1.batches'),
+      syncCollection<any>('idea_explorer_ideas', 'scienceOfGifts.ideaExplorer.v1.ideas'),
+      syncCollection<any>('idea_explorer_saved', 'scienceOfGifts.ideaExplorer.v1.saved')
     ]);
-    console.log('[Storage Sync] Firestore synchronization completed.');
+    console.log('[Storage Sync] Bi-directional Firestore synchronization completed.');
   } catch (err) {
-    console.warn('[Storage Sync] Firestore sync completed with notice:', err);
+    console.warn('[Storage Sync] Firestore sync notice:', err);
   }
 
   return {

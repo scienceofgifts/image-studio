@@ -87,6 +87,51 @@
         "deletedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "name", "version", "createdAt", "updatedAt"]
+    },
+    "IdeaExplorerSession": {
+      "title": "IdeaExplorerSession",
+      "description": "Sessions for the Idea Explorer brain storming tool.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "createdAt", "updatedAt"]
+    },
+    "IdeaExplorerBatch": {
+      "title": "IdeaExplorerBatch",
+      "description": "Idea Explorer batch generations.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "sessionId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "sessionId", "createdAt"]
+    },
+    "IdeaExplorerIdea": {
+      "title": "IdeaExplorerIdea",
+      "description": "Individual gift idea generated in Idea Explorer.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 300 },
+        "batchId": { "type": "string", "maxLength": 128 },
+        "sessionId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "title"]
+    },
+    "IdeaExplorerSavedItem": {
+      "title": "IdeaExplorerSavedItem",
+      "description": "Saved Idea Explorer items.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "savedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "savedAt"]
     }
   },
   "firestore": {
@@ -113,6 +158,22 @@
     "/direction_profiles/{profileId}": {
       "schema": "DirectionProfile",
       "description": "Visual direction presets with structured visual parameters."
+    },
+    "/idea_explorer_sessions/{sessionId}": {
+      "schema": "IdeaExplorerSession",
+      "description": "Idea Explorer sessions."
+    },
+    "/idea_explorer_batches/{batchId}": {
+      "schema": "IdeaExplorerBatch",
+      "description": "Idea Explorer batches."
+    },
+    "/idea_explorer_ideas/{ideaId}": {
+      "schema": "IdeaExplorerIdea",
+      "description": "Idea Explorer ideas."
+    },
+    "/idea_explorer_saved/{savedId}": {
+      "schema": "IdeaExplorerSavedItem",
+      "description": "Idea Explorer saved library."
     }
   }
 }

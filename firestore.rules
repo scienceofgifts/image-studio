@@ -44,5 +44,25 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isValidId(profileId);
     }
+
+    match /idea_explorer_sessions/{sessionId} {
+      allow read: if true;
+      allow write: if isValidId(sessionId);
+    }
+
+    match /idea_explorer_batches/{batchId} {
+      allow read: if true;
+      allow write: if isValidId(batchId);
+    }
+
+    match /idea_explorer_ideas/{ideaId} {
+      allow read: if true;
+      allow write: if isValidId(ideaId);
+    }
+
+    match /idea_explorer_saved/{savedId} {
+      allow read: if true;
+      allow write: if isValidId(savedId);
+    }
   }
 }

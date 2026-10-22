@@ -5,6 +5,8 @@ import {
   IdeaExplorerSavedItem,
   IdeaExplorerBackupData
 } from '../types/ideaExplorer';
+import { doc, setDoc } from 'firebase/firestore';
+import { db, isFirebaseConfigured } from '../services/firebase';
 
 const STORAGE_KEYS = {
   SESSIONS: 'scienceOfGifts.ideaExplorer.v1.sessions',
@@ -55,6 +57,11 @@ export function saveIdeaExplorerSession(session: IdeaExplorerSession): void {
     sessions.unshift(updated);
   }
   safeSetItem(STORAGE_KEYS.SESSIONS, sessions);
+
+  if (isFirebaseConfigured() && updated.id) {
+    setDoc(doc(db, 'idea_explorer_sessions', updated.id), JSON.parse(JSON.stringify(updated)), { merge: true })
+      .catch(err => console.warn('[Firestore] Session write failed:', err));
+  }
 }
 
 export function deleteIdeaExplorerSession(id: string): void {
@@ -64,6 +71,11 @@ export function deleteIdeaExplorerSession(id: string): void {
   // If active session was deleted, clear or reset active ID
   if (getActiveIdeaExplorerSessionId() === id) {
     setActiveIdeaExplorerSessionId(sessions.length > 0 ? sessions[0].id : null);
+  }
+
+  if (isFirebaseConfigured() && id) {
+    setDoc(doc(db, 'idea_explorer_sessions', id), { id, isDeleted: true, deletedAt: new Date().toISOString() }, { merge: true })
+      .catch(err => console.warn('[Firestore] Session delete write failed:', err));
   }
 }
 
@@ -112,6 +124,11 @@ export function saveIdeaExplorerBatch(batch: IdeaExplorerBatch): void {
     batches.push(batch);
   }
   safeSetItem(STORAGE_KEYS.BATCHES, batches);
+
+  if (isFirebaseConfigured() && batch.id) {
+    setDoc(doc(db, 'idea_explorer_batches', batch.id), JSON.parse(JSON.stringify(batch)), { merge: true })
+      .catch(err => console.warn('[Firestore] Batch write failed:', err));
+  }
 }
 
 // IDEAS
@@ -130,6 +147,15 @@ export function saveIdeaExplorerIdeas(newIdeas: IdeaExplorerIdea[]): void {
   ideas.forEach(i => map.set(i.id, i));
   newIdeas.forEach(i => map.set(i.id, i));
   safeSetItem(STORAGE_KEYS.IDEAS, Array.from(map.values()));
+
+  if (isFirebaseConfigured()) {
+    newIdeas.forEach(idea => {
+      if (idea && idea.id) {
+        setDoc(doc(db, 'idea_explorer_ideas', idea.id), JSON.parse(JSON.stringify(idea)), { merge: true })
+          .catch(err => console.warn('[Firestore] Idea write failed:', err));
+      }
+    });
+  }
 }
 
 // SAVED LIBRARY
@@ -150,6 +176,10 @@ export function toggleSaveIdeaExplorerItem(idea: IdeaExplorerIdea, notes?: strin
     // Remove
     saved.splice(existingIdx, 1);
     safeSetItem(STORAGE_KEYS.SAVED, saved);
+    if (isFirebaseConfigured()) {
+      setDoc(doc(db, 'idea_explorer_saved', idea.id), { id: idea.id, isDeleted: true, deletedAt: new Date().toISOString() }, { merge: true })
+        .catch(err => console.warn('[Firestore] Saved item delete write failed:', err));
+    }
     return false;
   } else {
     // Save
@@ -162,6 +192,10 @@ export function toggleSaveIdeaExplorerItem(idea: IdeaExplorerIdea, notes?: strin
     };
     saved.unshift(item);
     safeSetItem(STORAGE_KEYS.SAVED, saved);
+    if (isFirebaseConfigured()) {
+      setDoc(doc(db, 'idea_explorer_saved', item.id), JSON.parse(JSON.stringify(item)), { merge: true })
+        .catch(err => console.warn('[Firestore] Saved item write failed:', err));
+    }
     return true;
   }
 }
@@ -169,6 +203,10 @@ export function toggleSaveIdeaExplorerItem(idea: IdeaExplorerIdea, notes?: strin
 export function removeSavedIdeaExplorerItem(ideaId: string): void {
   const saved = getIdeaExplorerSavedItems().filter(s => s.idea.id !== ideaId && s.id !== ideaId);
   safeSetItem(STORAGE_KEYS.SAVED, saved);
+  if (isFirebaseConfigured()) {
+    setDoc(doc(db, 'idea_explorer_saved', ideaId), { id: ideaId, isDeleted: true, deletedAt: new Date().toISOString() }, { merge: true })
+      .catch(err => console.warn('[Firestore] Remove saved item write failed:', err));
+  }
 }
 
 // BACKUP EXPORT & IMPORT
