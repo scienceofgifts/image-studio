@@ -111,7 +111,7 @@ export const SessionHistoryModal: React.FC<SessionHistoryModalProps> = ({
                         {s.title || s.originalTopic}
                       </h4>
                       {isActive && (
-                        <span className="px-2 py-0.2 bg-amber-200 text-amber-900 rounded-full text-[10px] font-mono font-medium">
+                        <span className="px-2 py-[2px] bg-amber-200 text-amber-900 rounded-full text-[10px] font-mono font-medium">
                           Active
                         </span>
                       )}

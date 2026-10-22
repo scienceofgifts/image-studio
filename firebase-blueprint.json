@@ -1,0 +1,118 @@
+{
+  "entities": {
+    "ImageProject": {
+      "title": "ImageProject",
+      "description": "User image design projects containing idea, visual concepts, creative direction, brief, and prompts.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 300 },
+        "status": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "isDeleted": { "type": "boolean" },
+        "deletedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "title", "status", "createdAt", "updatedAt"]
+    },
+    "SavedConceptItem": {
+      "title": "SavedConceptItem",
+      "description": "Saved design concepts bookmarked from image studio sessions or idea generation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "sourceProjectId": { "type": "string", "maxLength": 128 },
+        "sourceProjectTitle": { "type": "string", "maxLength": 300 },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "isDeleted": { "type": "boolean" },
+        "deletedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "createdAt"]
+    },
+    "InspirationReference": {
+      "title": "InspirationReference",
+      "description": "Visual reference images, analyses, extracted design characteristics, and principles.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 300 },
+        "type": { "type": "string", "maxLength": 100 },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "inVisualProfile": { "type": "boolean" },
+        "isDeleted": { "type": "boolean" },
+        "deletedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "type", "createdAt"]
+    },
+    "VisualProfile": {
+      "title": "VisualProfile",
+      "description": "Reusable visual aesthetic style profiles.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "isDeleted": { "type": "boolean" },
+        "deletedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "title", "createdAt"]
+    },
+    "SynthesisConcept": {
+      "title": "SynthesisConcept",
+      "description": "Multi-inspiration synthesized concepts combining distinct visual styles.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "conceptTitle": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "isDeleted": { "type": "boolean" },
+        "deletedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "conceptTitle", "createdAt"]
+    },
+    "DirectionProfile": {
+      "title": "DirectionProfile",
+      "description": "Visual direction presets with structured visual parameters.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "version": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "isDeleted": { "type": "boolean" },
+        "deletedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "version", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/image_projects/{projectId}": {
+      "schema": "ImageProject",
+      "description": "User image design projects containing idea, visual concepts, creative direction, brief, and prompts."
+    },
+    "/saved_concepts/{conceptId}": {
+      "schema": "SavedConceptItem",
+      "description": "Saved design concepts bookmarked from image studio sessions or idea generation."
+    },
+    "/inspiration_library/{referenceId}": {
+      "schema": "InspirationReference",
+      "description": "Visual reference images, analyses, extracted design characteristics, and principles."
+    },
+    "/visual_profiles/{profileId}": {
+      "schema": "VisualProfile",
+      "description": "Reusable visual aesthetic style profiles."
+    },
+    "/synthesis_concepts/{synthesisId}": {
+      "schema": "SynthesisConcept",
+      "description": "Multi-inspiration synthesized concepts combining distinct visual styles."
+    },
+    "/direction_profiles/{profileId}": {
+      "schema": "DirectionProfile",
+      "description": "Visual direction presets with structured visual parameters."
+    }
+  }
+}

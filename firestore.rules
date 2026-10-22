@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny global net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Health / connection test document
+    match /test/connection {
+      allow read: if true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    match /image_projects/{projectId} {
+      allow read: if true;
+      allow write: if isValidId(projectId);
+    }
+
+    match /saved_concepts/{conceptId} {
+      allow read: if true;
+      allow write: if isValidId(conceptId);
+    }
+
+    match /inspiration_library/{referenceId} {
+      allow read: if true;
+      allow write: if isValidId(referenceId);
+    }
+
+    match /visual_profiles/{profileId} {
+      allow read: if true;
+      allow write: if isValidId(profileId);
+    }
+
+    match /synthesis_concepts/{synthesisId} {
+      allow read: if true;
+      allow write: if isValidId(synthesisId);
+    }
+
+    match /direction_profiles/{profileId} {
+      allow read: if true;
+      allow write: if isValidId(profileId);
+    }
+  }
+}

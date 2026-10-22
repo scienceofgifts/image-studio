@@ -45,7 +45,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <span>{label}</span>
           </label>
           {isOverride && (
-            <span className="text-[10px] text-amber-800 font-medium bg-amber-100 px-1.5 py-0.2 rounded border border-amber-300">
+            <span className="text-[10px] text-amber-800 font-medium bg-amber-100 px-1.5 py-[2px] rounded border border-amber-300">
               Task Override
             </span>
           )}
@@ -96,7 +96,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     <span className="font-semibold text-stone-900 flex items-center gap-1.5">
                       {m.displayName}
                       {isGlobalDefault && (
-                        <span className="text-[9px] bg-stone-200 text-stone-800 px-1.5 py-0.2 rounded font-mono">
+                        <span className="text-[9px] bg-stone-200 text-stone-800 px-1.5 py-[2px] rounded font-mono">
                           Default
                         </span>
                       )}
@@ -109,7 +109,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                   </p>
 
                   <div className="flex items-center gap-2 pt-1 text-[10px]">
-                    <span className={`px-1.5 py-0.2 rounded border font-mono font-medium ${m.badgeColor}`}>
+                    <span className={`px-1.5 py-[2px] rounded border font-mono font-medium ${m.badgeColor}`}>
                       {m.speed}
                     </span>
                     <span className="text-stone-400 font-sans">·</span>

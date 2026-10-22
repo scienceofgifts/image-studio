@@ -122,7 +122,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                     <p className="text-[11px] text-stone-600">{model.description}</p>
                     <div className="flex items-center gap-2 pt-1 text-[10px]">
-                      <span className={`px-1.5 py-0.2 rounded border font-mono ${model.badgeColor}`}>
+                      <span className={`px-1.5 py-[2px] rounded border font-mono ${model.badgeColor}`}>
                         {model.speed}
                       </span>
                       <span className="text-stone-400">·</span>

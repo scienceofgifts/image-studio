@@ -14,12 +14,18 @@ import { FolderKanban, Plus, Sparkles, LayoutGrid, Image as ImageIcon, Sliders, 
 
 import { handleGlobalEscapeKey, useOverlay } from './utils/overlayManager';
 import { getApiUrl } from './services/apiConfig';
+import { User } from 'firebase/auth';
+import { signInWithGoogle, signOutUser, subscribeToAuthChanges } from './services/firebase';
 
 export default function App() {
   const [activeView, setActiveView] = useState<MainView>('projects');
   const [projects, setProjects] = useState<ImageProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string>('');
   const [activeStep, setActiveStep] = useState<string>('idea');
+
+  // Auth & Sync State
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Modals
   const [isQuickPrompterOpen, setIsQuickPrompterOpen] = useState(false);
@@ -47,8 +53,6 @@ export default function App() {
   useOverlay(isSettingsOpen, () => setIsSettingsOpen(false), 'app-settings-modal');
   useOverlay(isNewProjectModalOpen, () => setIsNewProjectModalOpen(false), 'app-new-project-modal');
 
-  const [isSyncing, setIsSyncing] = useState(false);
-
   const refreshData = () => {
     const loaded = getImageProjects();
     setProjects(loaded);
@@ -56,6 +60,29 @@ export default function App() {
       setActiveProjectId(loaded[0].id);
     }
   };
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      await syncDataFromCloud();
+    } catch (err) {
+      console.warn('[Cloud Sync] Notice during manual sync:', err);
+    } finally {
+      setIsSyncing(false);
+      refreshData();
+    }
+  };
+
+  // Subscribe to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = subscribeToAuthChanges((user) => {
+      setCurrentUser(user);
+      if (user) {
+        handleManualSync();
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -78,6 +105,23 @@ export default function App() {
       isMounted = false;
     };
   }, []);
+
+  const handleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+      await handleManualSync();
+    } catch (err) {
+      console.error('Sign in error:', err);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOutUser();
+    } catch (err) {
+      console.error('Sign out error:', err);
+    }
+  };
 
   const handleOpenProject = (id: string, step = 'idea') => {
     setActiveProjectId(id);
@@ -237,7 +281,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#faf8f5] font-sans text-stone-900 selection:bg-amber-200 selection:text-amber-950">
-      {/* Redesigned Navigation */}
+      {/* Redesigned Navigation with Auth & Sync */}
       <Navigation
         activeView={activeView}
         onSelectView={setActiveView}
@@ -248,128 +292,160 @@ export default function App() {
         }}
         onOpenQuickPrompter={() => setIsQuickPrompterOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        currentUser={currentUser}
+        isSyncing={isSyncing}
+        onSyncData={handleManualSync}
+        onSignIn={handleSignIn}
+        onSignOut={handleSignOut}
       />
 
-      {/* Main View Router */}
+      {/* Main Content Area */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {activeView === 'projects' && (
+          <div className="space-y-6 animate-fade-in">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-200 pb-4">
+              <div>
+                <h1 className="text-2xl font-serif font-bold text-stone-900 tracking-tight">Image Studio Projects</h1>
+                <p className="text-xs text-stone-500 font-sans mt-0.5">
+                  Conceptualize, refine visual directions, and generate production-ready AI image prompts.
+                </p>
+              </div>
 
-      {/* VIEW 1: PROJECTS DASHBOARD */}
-      {activeView === 'projects' && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-200 pb-6">
-            <div>
-              <h1 className="text-2xl font-serif text-stone-900 font-semibold tracking-tight">
-                Image Design Projects
-              </h1>
-              <p className="text-xs text-stone-600 mt-1">
-                Conceptualize, refine, and document visual designs for Science of Gifts artwork and prompts.
-              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleManualSync}
+                  disabled={isSyncing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white hover:bg-stone-100 text-stone-700 rounded-xl border border-stone-300 transition-colors shadow-2xs"
+                  title="Force refresh & sync with Firebase Cloud"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-amber-600' : 'text-stone-500'}`} />
+                  <span>{isSyncing ? 'Syncing...' : 'Sync Cloud'}</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setInitialConceptForNewProj(null);
+                    setInitialInspForNewProj(null);
+                    setIsNewProjectModalOpen(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium bg-stone-900 hover:bg-stone-800 text-white rounded-xl transition-colors shadow-2xs font-sans"
+                >
+                  <Plus className="w-3.5 h-3.5 text-amber-400" />
+                  <span>New Project</span>
+                </button>
+              </div>
             </div>
 
-            <button
-              onClick={() => {
-                setInitialConceptForNewProj(null);
-                setInitialInspForNewProj(null);
-                setIsNewProjectModalOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-medium transition-colors shrink-0 shadow-2xs"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>New Project</span>
-            </button>
-          </div>
-
-          {/* Projects Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {projects.map((proj) => (
-              <div
-                key={proj.id}
-                onClick={() => handleOpenProject(proj.id)}
-                className="bg-white border border-stone-200/80 hover:border-amber-400/80 rounded-2xl p-5 space-y-4 flex flex-col justify-between transition-all cursor-pointer shadow-2xs hover:shadow-sm group"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono text-amber-900 font-semibold uppercase tracking-wider px-2 py-0.5 bg-amber-100 rounded-md border border-amber-300">
-                      {proj.status}
-                    </span>
-                    <span className="text-[11px] text-stone-500">
-                      {new Date(proj.updatedAt).toLocaleDateString()}
-                    </span>
-                  </div>
-
-                  <h3 className="text-base font-serif font-semibold text-stone-900 group-hover:text-amber-900 transition-colors">
-                    {proj.title}
-                  </h3>
-
-                  <p className="text-xs text-stone-600 line-clamp-2">
-                    Idea: {proj.imageIdea.idea} · Medium: {proj.intendedOutput}
-                  </p>
-
-                  {proj.finalPrompt && (
-                    <p className="text-[11px] text-stone-600 bg-stone-50 p-2.5 rounded-lg border border-stone-200 line-clamp-2 italic">
-                      "{proj.finalPrompt}"
-                    </p>
-                  )}
+            {projects.length === 0 ? (
+              <div className="bg-white border border-stone-200/80 rounded-2xl p-12 text-center space-y-4 shadow-2xs max-w-lg mx-auto my-12">
+                <div className="w-12 h-12 bg-amber-100 text-amber-800 rounded-2xl flex items-center justify-center mx-auto shadow-2xs">
+                  <ImageIcon className="w-6 h-6" />
                 </div>
-
-                <div className="pt-3 border-t border-stone-100 flex items-center justify-between text-xs text-stone-600 group-hover:text-amber-900 font-medium transition-colors">
-                  <span>Open Design Studio</span>
-                  <ArrowRight className="w-4 h-4" />
-                </div>
+                <h3 className="text-lg font-serif font-semibold text-stone-900">No Image Projects Yet</h3>
+                <p className="text-xs text-stone-500 max-w-sm mx-auto leading-relaxed">
+                  Start a new project to conceptualize visual themes, analyze reference artwork, and generate high-fidelity AI prompts.
+                </p>
+                <button
+                  onClick={() => setIsNewProjectModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white text-xs font-medium rounded-xl transition-colors shadow-xs"
+                >
+                  <Plus className="w-4 h-4 text-amber-400" />
+                  <span>Create First Project</span>
+                </button>
               </div>
-            ))}
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {projects.map(proj => (
+                  <div
+                    key={proj.id}
+                    onClick={() => handleOpenProject(proj.id)}
+                    className="group bg-white border border-stone-200/80 hover:border-amber-400/80 rounded-2xl p-5 shadow-2xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between space-y-4"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-mono uppercase tracking-wider bg-stone-100 text-stone-700 px-2 py-0.5 rounded border border-stone-200">
+                          {proj.status}
+                        </span>
+                        <span className="text-[10px] text-stone-400 font-mono">
+                          {new Date(proj.updatedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <h3 className="text-base font-serif font-semibold text-stone-900 group-hover:text-amber-900 transition-colors line-clamp-1">
+                        {proj.title}
+                      </h3>
+                      <p className="text-xs text-stone-600 line-clamp-2 leading-relaxed">
+                        {proj.imageIdea?.idea || 'No description entered yet.'}
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-stone-100 flex items-center justify-between text-xs text-stone-500">
+                      <span className="font-mono text-[11px] text-stone-500">
+                        {proj.intendedOutput || 'Artwork'}
+                      </span>
+                      <span className="flex items-center gap-1 font-medium text-stone-700 group-hover:text-amber-800 group-hover:translate-x-0.5 transition-all">
+                        <span>Open Studio</span>
+                        <ArrowRight className="w-3.5 h-3.5 text-amber-600" />
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* VIEW 2: PROJECT DETAIL WORKFLOW */}
-      {activeView === 'project-detail' && (
-        <ImageStudioWorkspace
-          projectId={activeProjectId}
-          activeStep={activeStep}
-          onSelectStep={setActiveStep}
-          onBackToProjects={() => {
-            refreshData();
-            setActiveView('projects');
-          }}
-          onUpdateProject={refreshData}
-        />
-      )}
+        {activeView === 'project-detail' && (
+          <ImageStudioWorkspace
+            projectId={activeProjectId}
+            activeStep={activeStep}
+            onSelectStep={setActiveStep}
+            onBackToProjects={() => setActiveView('projects')}
+            onUpdateProject={() => refreshData()}
+          />
+        )}
 
-      {/* VIEW 3: SAVED CONCEPT & PROJECT GALLERY */}
-      {activeView === 'gallery' && (
-        <GalleryView
-          projects={projects}
-          onOpenProject={(id) => handleOpenProject(id)}
-          onCreateProjectFromConcept={handleCreateProjectFromConcept}
-          onCreateProjectFromSynthesis={handleCreateProjectFromSynthesis}
-          onRefreshData={refreshData}
-        />
-      )}
+        {activeView === 'gallery' && (
+          <GalleryView
+            projects={projects}
+            onOpenProject={(id) => handleOpenProject(id)}
+            onCreateProjectFromConcept={handleCreateProjectFromConcept}
+            onCreateProjectFromSynthesis={handleCreateProjectFromSynthesis}
+            onRefreshData={refreshData}
+          />
+        )}
 
-      {/* VIEW 3B: IDEA EXPLORER */}
-      {activeView === 'idea-explorer' && (
-        <IdeaExplorerWorkspace
-          onCreateProjectFromIdea={handleCreateProjectFromIdea}
-        />
-      )}
+        {activeView === 'idea-explorer' && (
+          <IdeaExplorerWorkspace
+            onCreateProjectFromIdea={handleCreateProjectFromIdea}
+          />
+        )}
 
-      {/* VIEW 4: INSPIRATION LIBRARY */}
-      {activeView === 'inspiration' && (
-        <InspirationGallery
-          onAnalyzeReference={handleAnalyzeReferenceGlobal}
-          onCreateProjectFromInspiration={handleCreateProjectFromInspiration}
-          onCreateProjectFromSynthesis={handleCreateProjectFromSynthesis}
-          onRefreshData={refreshData}
-          isAnalyzing={false}
-        />
-      )}
+        {activeView === 'inspiration' && (
+          <InspirationGallery
+            onAnalyzeReference={handleAnalyzeReferenceGlobal}
+            onCreateProjectFromInspiration={handleCreateProjectFromInspiration}
+            onCreateProjectFromSynthesis={handleCreateProjectFromSynthesis}
+            onRefreshData={refreshData}
+            isAnalyzing={false}
+          />
+        )}
 
-      {/* VIEW 5: VISUAL PROFILES */}
-      {activeView === 'profiles' && (
-        <VisualProfilesView onRefreshData={refreshData} />
-      )}
+        {activeView === 'profiles' && (
+          <VisualProfilesView
+            onRefreshData={refreshData}
+          />
+        )}
+      </main>
 
-      {/* MODALS */}
+      {/* Modals */}
+      <NewProjectModal
+        isOpen={isNewProjectModalOpen}
+        onClose={() => setIsNewProjectModalOpen(false)}
+        onCreateProject={handleCreatedNewProject}
+        initialSavedConcept={initialConceptForNewProj}
+        initialInspirationRef={initialInspForNewProj}
+      />
+
       <LegacyPromptGenerator
         isOpen={isQuickPrompterOpen}
         onClose={() => setIsQuickPrompterOpen(false)}
@@ -380,22 +456,6 @@ export default function App() {
         onClose={() => setIsSettingsOpen(false)}
         onDataRestored={refreshData}
       />
-
-      <NewProjectModal
-        isOpen={isNewProjectModalOpen}
-        onClose={() => setIsNewProjectModalOpen(false)}
-        onCreateProject={handleCreatedNewProject}
-        initialSavedConcept={initialConceptForNewProj}
-        initialInspirationRef={initialInspForNewProj}
-      />
-
-      {/* Cloud Sync Status Indicator */}
-      {isSyncing && (
-        <div className="fixed bottom-4 right-4 z-50 bg-stone-900/90 backdrop-blur-xs text-stone-100 px-3.5 py-2 rounded-xl shadow-lg border border-stone-700/80 flex items-center gap-2.5 text-xs animate-fadeIn">
-          <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
-          <span>Syncing data...</span>
-        </div>
-      )}
     </div>
   );
 }

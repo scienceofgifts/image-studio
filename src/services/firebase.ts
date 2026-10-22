@@ -1,19 +1,106 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, Firestore } from 'firebase/firestore';
-
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyDummyKeyForFallbackBuild12345',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'science-of-gifts.firebaseapp.com',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'science-of-gifts',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'science-of-gifts.appspot.com',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '1234567890',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:1234567890:web:dummyAppId12345',
-};
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  signOut as firebaseSignOut, 
+  onAuthStateChanged, 
+  User 
+} from 'firebase/auth';
+import { getFirestore, doc, getDocFromServer, Firestore } from 'firebase/firestore';
+import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-export const db: Firestore = getFirestore(app);
+
+// CRITICAL: The app will break without passing firestoreDatabaseId
+export const db: Firestore = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
+export const auth = getAuth(app);
+export const googleAuthProvider = new GoogleAuthProvider();
 
 export function isFirebaseConfigured(): boolean {
-  const key = import.meta.env.VITE_FIREBASE_API_KEY;
-  return Boolean(key && key !== 'AIzaSyDummyKeyForFallbackBuild12345' && key.trim() !== '');
+  return Boolean(firebaseConfig && firebaseConfig.apiKey && firebaseConfig.projectId);
+}
+
+// Validation connection test
+export async function testFirestoreConnection(): Promise<void> {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+    console.log('[Firebase] Connection successfully verified.');
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn('[Firebase] Client is offline or database unreachable. Check configuration.');
+    }
+  }
+}
+testFirestoreConnection();
+
+// AUTHENTICATION HELPERS
+export async function signInWithGoogle(): Promise<User | null> {
+  try {
+    const result = await signInWithPopup(auth, googleAuthProvider);
+    return result.user;
+  } catch (err) {
+    console.error('[Firebase Auth] Sign in failed:', err);
+    throw err;
+  }
+}
+
+export async function signOutUser(): Promise<void> {
+  try {
+    await firebaseSignOut(auth);
+  } catch (err) {
+    console.error('[Firebase Auth] Sign out failed:', err);
+    throw err;
+  }
+}
+
+export function subscribeToAuthChanges(callback: (user: User | null) => void): () => void {
+  return onAuthStateChanged(auth, callback);
+}
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
 }

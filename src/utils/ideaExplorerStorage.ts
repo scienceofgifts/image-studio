@@ -87,6 +87,12 @@ export function setActiveIdeaExplorerSessionId(id: string | null): void {
   }
 }
 
+export function getActiveIdeaExplorerSession(): IdeaExplorerSession | null {
+  const activeId = getActiveIdeaExplorerSessionId();
+  if (!activeId) return null;
+  return getIdeaExplorerSession(activeId);
+}
+
 // BATCHES
 export function getIdeaExplorerBatches(): IdeaExplorerBatch[] {
   return safeGetItem<IdeaExplorerBatch[]>(STORAGE_KEYS.BATCHES, []);
