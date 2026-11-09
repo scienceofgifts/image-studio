@@ -127,7 +127,8 @@ export default function App() {
 
   const handleOpenProject = (id: string, step = 'idea') => {
     setActiveProjectId(id);
-    setActiveStep(step);
+    const normalizedStep = step === 'concepts' ? 'idea' : step === 'inspiration' ? 'direction' : step;
+    setActiveStep(normalizedStep);
     setActiveView('project-detail');
   };
 
@@ -202,7 +203,7 @@ export default function App() {
     saveImageProject(newProj);
     refreshData();
     setActiveProjectId(newProj.id);
-    setActiveStep(newProj.status === 'concepts' ? 'concepts' : 'idea');
+    setActiveStep('idea');
     setActiveView('project-detail');
   };
 
@@ -211,7 +212,7 @@ export default function App() {
     const newProj: ImageProject = {
       id: `proj-${Date.now()}`,
       title: idea.title || 'Idea Project',
-      status: 'concepts',
+      status: 'idea',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       imageIdea: {
@@ -260,7 +261,7 @@ export default function App() {
     saveImageProject(newProj);
     refreshData();
     setActiveProjectId(newProj.id);
-    setActiveStep('concepts');
+    setActiveStep('idea');
     setActiveView('project-detail');
   };
 

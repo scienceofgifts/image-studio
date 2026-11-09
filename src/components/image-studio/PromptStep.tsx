@@ -143,7 +143,7 @@ ${project.modelNotes || 'Suitable for Google Flow, Midjourney v6, or Gemini imag
       <div className="bg-white border border-stone-200/80 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
         <div>
           <span className="text-[10px] font-mono uppercase tracking-wider text-amber-800 font-semibold block mb-0.5">
-            STAGE 06 · FINAL PROMPT TRANSLATION
+            STAGE 04 · FINAL PROMPT TRANSLATION
           </span>
           <h2 className="text-xl font-serif text-stone-900 font-semibold">Prompt Package &amp; Export</h2>
           <p className="text-xs text-stone-600 mt-1">

@@ -88,6 +88,17 @@
       },
       "required": ["id", "name", "version", "createdAt", "updatedAt"]
     },
+    "UserPreference": {
+      "title": "UserPreference",
+      "description": "Persisted user studio preferences such as last-used visual direction profile.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "profileId": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "updatedAt"]
+    },
     "IdeaExplorerSession": {
       "title": "IdeaExplorerSession",
       "description": "Sessions for the Idea Explorer brain storming tool.",
@@ -158,6 +169,10 @@
     "/direction_profiles/{profileId}": {
       "schema": "DirectionProfile",
       "description": "Visual direction presets with structured visual parameters."
+    },
+    "/user_preferences/{prefId}": {
+      "schema": "UserPreference",
+      "description": "Persisted user preferences such as last-used direction profile."
     },
     "/idea_explorer_sessions/{sessionId}": {
       "schema": "IdeaExplorerSession",

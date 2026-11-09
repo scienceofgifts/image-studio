@@ -43,7 +43,7 @@ export const BriefStep: React.FC<BriefStepProps> = ({
       <div className="bg-white border border-stone-200/80 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
         <div>
           <span className="text-[10px] font-mono uppercase tracking-wider text-amber-800 font-semibold block mb-0.5">
-            STAGE 05 · MASTER DESIGN BRIEF
+            STAGE 03 · MASTER DESIGN BRIEF
           </span>
           <h2 className="text-xl font-serif text-stone-900 font-semibold">Comprehensive Design Brief</h2>
           <p className="text-xs text-stone-600 mt-1">

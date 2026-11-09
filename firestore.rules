@@ -45,6 +45,11 @@ service cloud.firestore {
       allow write: if isValidId(profileId);
     }
 
+    match /user_preferences/{prefId} {
+      allow read: if true;
+      allow write: if isValidId(prefId);
+    }
+
     match /idea_explorer_sessions/{sessionId} {
       allow read: if true;
       allow write: if isValidId(sessionId);

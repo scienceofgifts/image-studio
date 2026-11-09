@@ -16,30 +16,188 @@ const STORAGE_KEYS = {
   ACTIVE_SESSION: 'scienceOfGifts.ideaExplorer.v1.activeSessionId'
 };
 
+const MAX_LOCAL_IDEAS = 150;
+const MAX_LOCAL_BATCHES = 30;
+const MAX_LOCAL_SESSIONS = 30;
+
+// In-memory fallback store so the active session never loses data even if browser localStorage quota is full
+const memoryStore = new Map<string, any>();
+
+function reclaimQuotaSpace(): void {
+  try {
+    // 1. Compact soft-deleted tombstones and heavy base64 images in main studio keys
+    const studioKeys = [
+      'sog_image_projects_v2',
+      'sog_inspiration_library_v2',
+      'sog_saved_concepts_v2',
+      'sog_synthesis_concepts_v2'
+    ];
+
+    for (const sKey of studioKeys) {
+      const raw = localStorage.getItem(sKey);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) continue;
+        let modified = false;
+        const compacted = parsed.map((item: any) => {
+          if (item && item.isDeleted) {
+            modified = true;
+            return {
+              id: item.id,
+              isDeleted: true,
+              deletedAt: item.deletedAt || item.updatedAt || new Date().toISOString(),
+              updatedAt: item.updatedAt || item.deletedAt || new Date().toISOString()
+            };
+          }
+          // Strip large base64 imageDataUrl from localStorage cache if over 50KB
+          if (item && typeof item.imageDataUrl === 'string' && item.imageDataUrl.length > 50000) {
+            modified = true;
+            const { imageDataUrl, ...rest } = item;
+            return rest;
+          }
+          if (item && Array.isArray(item.inspirationReferences)) {
+            const cleanedRefs = item.inspirationReferences.map((ref: any) => {
+              if (ref && typeof ref.imageDataUrl === 'string' && ref.imageDataUrl.length > 50000) {
+                modified = true;
+                const { imageDataUrl, ...restRef } = ref;
+                return restRef;
+              }
+              return ref;
+            });
+            if (modified) {
+              return { ...item, inspirationReferences: cleanedRefs };
+            }
+          }
+          return item;
+        });
+        if (modified) {
+          localStorage.setItem(sKey, JSON.stringify(compacted));
+        }
+      } catch {
+        // Ignore parse errors during compaction
+      }
+    }
+
+    // 2. Trim older unsaved Idea Explorer ideas/batches in localStorage
+    const rawSaved = localStorage.getItem(STORAGE_KEYS.SAVED);
+    const savedIds = new Set<string>();
+    if (rawSaved) {
+      try {
+        const savedList = JSON.parse(rawSaved);
+        if (Array.isArray(savedList)) {
+          savedList.forEach((s: any) => {
+            if (s?.id) savedIds.add(s.id);
+            if (s?.idea?.id) savedIds.add(s.idea.id);
+          });
+        }
+      } catch {
+        // Ignore
+      }
+    }
+
+    const rawIdeas = localStorage.getItem(STORAGE_KEYS.IDEAS);
+    if (rawIdeas) {
+      try {
+        const ideasList: IdeaExplorerIdea[] = JSON.parse(rawIdeas);
+        if (Array.isArray(ideasList) && ideasList.length > 60) {
+          const savedOnes = ideasList.filter(i => i && (i.isSaved || savedIds.has(i.id)));
+          const unsavedOnes = ideasList.filter(i => i && !i.isSaved && !savedIds.has(i.id));
+          const keptUnsaved = unsavedOnes.slice(-50);
+          localStorage.setItem(STORAGE_KEYS.IDEAS, JSON.stringify([...savedOnes, ...keptUnsaved]));
+        }
+      } catch {
+        // Ignore
+      }
+    }
+
+    const rawBatches = localStorage.getItem(STORAGE_KEYS.BATCHES);
+    if (rawBatches) {
+      try {
+        const batchesList: IdeaExplorerBatch[] = JSON.parse(rawBatches);
+        if (Array.isArray(batchesList) && batchesList.length > 15) {
+          localStorage.setItem(STORAGE_KEYS.BATCHES, JSON.stringify(batchesList.slice(-15)));
+        }
+      } catch {
+        // Ignore
+      }
+    }
+  } catch {
+    // Ignore errors during space reclamation
+  }
+}
+
 function safeGetItem<T>(key: string, defaultValue: T): T {
   try {
     const raw = localStorage.getItem(key);
-    if (!raw) return defaultValue;
-    return JSON.parse(raw) as T;
+    if (!raw) {
+      if (memoryStore.has(key)) {
+        return memoryStore.get(key) as T;
+      }
+      return defaultValue;
+    }
+    const parsed = JSON.parse(raw) as T;
+    if (Array.isArray(parsed) && memoryStore.has(key)) {
+      const memVal = memoryStore.get(key);
+      if (Array.isArray(memVal) && memVal.length > parsed.length) {
+        // Merge localStorage with in-memory items so nothing is lost if localStorage was trimmed
+        const mergedMap = new Map<string, any>();
+        parsed.forEach((item: any) => {
+          if (item && item.id) mergedMap.set(item.id, item);
+        });
+        memVal.forEach((item: any) => {
+          if (item && item.id) mergedMap.set(item.id, item);
+        });
+        return Array.from(mergedMap.values()) as unknown as T;
+      }
+    }
+    return parsed;
   } catch (err) {
-    console.error(`[IdeaExplorerStorage] Failed to read ${key}:`, err);
+    if (memoryStore.has(key)) {
+      return memoryStore.get(key) as T;
+    }
+    console.warn(`[IdeaExplorerStorage] Notice reading ${key}:`, err);
     return defaultValue;
   }
 }
 
 function safeSetItem(key: string, value: any): boolean {
+  // Always keep full value in memory so current session works seamlessly
+  memoryStore.set(key, value);
+
+  let valueToStore = value;
+  if (key === STORAGE_KEYS.IDEAS && Array.isArray(value) && value.length > MAX_LOCAL_IDEAS) {
+    valueToStore = value.slice(-MAX_LOCAL_IDEAS);
+  } else if (key === STORAGE_KEYS.BATCHES && Array.isArray(value) && value.length > MAX_LOCAL_BATCHES) {
+    valueToStore = value.slice(-MAX_LOCAL_BATCHES);
+  } else if (key === STORAGE_KEYS.SESSIONS && Array.isArray(value) && value.length > MAX_LOCAL_SESSIONS) {
+    valueToStore = value.slice(0, MAX_LOCAL_SESSIONS);
+  }
+
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    localStorage.setItem(key, JSON.stringify(valueToStore));
     return true;
-  } catch (err) {
-    console.error(`[IdeaExplorerStorage] Failed to write ${key}:`, err);
-    return false;
+  } catch {
+    // Reclaim space and retry
+    reclaimQuotaSpace();
+    try {
+      const retryVal = Array.isArray(valueToStore) && valueToStore.length > 40
+        ? (key === STORAGE_KEYS.SESSIONS ? valueToStore.slice(0, 20) : valueToStore.slice(-40))
+        : valueToStore;
+      localStorage.setItem(key, JSON.stringify(retryVal));
+      return true;
+    } catch {
+      // Data is still safely held in memoryStore and synced to Firestore
+      return false;
+    }
   }
 }
 
 // SESSIONS
 export function getIdeaExplorerSessions(): IdeaExplorerSession[] {
-  return safeGetItem<IdeaExplorerSession[]>(STORAGE_KEYS.SESSIONS, []);
+  return safeGetItem<IdeaExplorerSession[]>(STORAGE_KEYS.SESSIONS, []).filter(
+    (s: any) => s && !s.isDeleted
+  );
 }
 
 export function getIdeaExplorerSession(id: string): IdeaExplorerSession | null {
@@ -81,21 +239,31 @@ export function deleteIdeaExplorerSession(id: string): void {
 
 export function getActiveIdeaExplorerSessionId(): string | null {
   try {
-    return localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION) || null;
+    return localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION) || memoryStore.get(STORAGE_KEYS.ACTIVE_SESSION) || null;
   } catch {
-    return null;
+    return memoryStore.get(STORAGE_KEYS.ACTIVE_SESSION) || null;
   }
 }
 
 export function setActiveIdeaExplorerSessionId(id: string | null): void {
+  if (id) {
+    memoryStore.set(STORAGE_KEYS.ACTIVE_SESSION, id);
+  } else {
+    memoryStore.delete(STORAGE_KEYS.ACTIVE_SESSION);
+  }
   try {
     if (id) {
       localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, id);
     } else {
       localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
     }
-  } catch (err) {
-    console.error('[IdeaExplorerStorage] Failed to set active session ID:', err);
+  } catch {
+    reclaimQuotaSpace();
+    try {
+      if (id) localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, id);
+    } catch {
+      // Held in memoryStore
+    }
   }
 }
 
@@ -107,7 +275,9 @@ export function getActiveIdeaExplorerSession(): IdeaExplorerSession | null {
 
 // BATCHES
 export function getIdeaExplorerBatches(): IdeaExplorerBatch[] {
-  return safeGetItem<IdeaExplorerBatch[]>(STORAGE_KEYS.BATCHES, []);
+  return safeGetItem<IdeaExplorerBatch[]>(STORAGE_KEYS.BATCHES, []).filter(
+    (b: any) => b && !b.isDeleted
+  );
 }
 
 export function getIdeaExplorerBatch(id: string): IdeaExplorerBatch | null {
@@ -133,7 +303,9 @@ export function saveIdeaExplorerBatch(batch: IdeaExplorerBatch): void {
 
 // IDEAS
 export function getIdeaExplorerIdeas(): IdeaExplorerIdea[] {
-  return safeGetItem<IdeaExplorerIdea[]>(STORAGE_KEYS.IDEAS, []);
+  return safeGetItem<IdeaExplorerIdea[]>(STORAGE_KEYS.IDEAS, []).filter(
+    (i: any) => i && !i.isDeleted
+  );
 }
 
 export function getIdeaExplorerIdea(id: string): IdeaExplorerIdea | null {
@@ -144,8 +316,12 @@ export function getIdeaExplorerIdea(id: string): IdeaExplorerIdea | null {
 export function saveIdeaExplorerIdeas(newIdeas: IdeaExplorerIdea[]): void {
   const ideas = getIdeaExplorerIdeas();
   const map = new Map<string, IdeaExplorerIdea>();
-  ideas.forEach(i => map.set(i.id, i));
-  newIdeas.forEach(i => map.set(i.id, i));
+  ideas.forEach(i => {
+    if (i && i.id) map.set(i.id, i);
+  });
+  newIdeas.forEach(i => {
+    if (i && i.id) map.set(i.id, i);
+  });
   safeSetItem(STORAGE_KEYS.IDEAS, Array.from(map.values()));
 
   if (isFirebaseConfigured()) {
@@ -160,7 +336,9 @@ export function saveIdeaExplorerIdeas(newIdeas: IdeaExplorerIdea[]): void {
 
 // SAVED LIBRARY
 export function getIdeaExplorerSavedItems(): IdeaExplorerSavedItem[] {
-  return safeGetItem<IdeaExplorerSavedItem[]>(STORAGE_KEYS.SAVED, []);
+  return safeGetItem<IdeaExplorerSavedItem[]>(STORAGE_KEYS.SAVED, []).filter(
+    (s: any) => s && !s.isDeleted && s.idea
+  );
 }
 
 export function isIdeaExplorerItemSaved(ideaId: string): boolean {

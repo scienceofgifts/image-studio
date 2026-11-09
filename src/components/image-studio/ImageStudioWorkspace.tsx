@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { ImageProject, InspirationReference, ReferenceAnalysis } from '../../types';
+import { ImageProject } from '../../types';
 import { getImageProjects, saveImageProject, safeStringify } from '../../utils/storage';
 import { getModelConfig } from '../../utils/models';
 import { getApiUrl } from '../../services/apiConfig';
 import { IdeaStep } from './IdeaStep';
-import { ConceptsStep } from './ConceptsStep';
-import { InspirationStep } from './InspirationStep';
 import { DirectionStep } from './DirectionStep';
 import { BriefStep } from './BriefStep';
 import { PromptStep } from './PromptStep';
-import { Lightbulb, Layers, ImageIcon, Compass, FileText, Sparkles, AlertCircle, ArrowLeft } from 'lucide-react';
+import { Lightbulb, Compass, FileText, Sparkles, AlertCircle, ArrowLeft } from 'lucide-react';
 
 interface ImageStudioWorkspaceProps {
   projectId: string;
@@ -26,7 +24,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
   onBackToProjects,
   onUpdateProject
 }) => {
-  const [projects, setProjects] = useState<ImageProject[]>([]);
+  const [projects, setProjects] = useState<ImageProject[]>(() => getImageProjects());
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -34,7 +32,36 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
     setProjects(getImageProjects());
   }, [projectId]);
 
-  const activeProject = projects.find(p => p.id === projectId) || projects[0];
+  useEffect(() => {
+    const handleStorageUpdated = () => {
+      setProjects(getImageProjects());
+    };
+    window.addEventListener('sog-storage-updated', handleStorageUpdated);
+    return () => {
+      window.removeEventListener('sog-storage-updated', handleStorageUpdated);
+    };
+  }, []);
+
+  // Normalize any legacy step IDs ('concepts' -> 'idea', 'inspiration' -> 'direction')
+  const normalizedStep =
+    activeStep === 'concepts'
+      ? 'idea'
+      : activeStep === 'inspiration'
+      ? 'direction'
+      : activeStep;
+
+  useEffect(() => {
+    if (activeStep === 'concepts') {
+      onSelectStep('idea');
+    } else if (activeStep === 'inspiration') {
+      onSelectStep('direction');
+    }
+  }, [activeStep, onSelectStep]);
+
+  const activeProject =
+    projects.find(p => p.id === projectId) ||
+    getImageProjects().find(p => p.id === projectId) ||
+    projects[0];
 
   const handleUpdateProject = (updated: ImageProject) => {
     saveImageProject(updated);
@@ -45,12 +72,10 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
   };
 
   const steps = [
-    { id: 'idea', label: '1. Idea', icon: Lightbulb },
-    { id: 'concepts', label: '2. Concepts', icon: Layers },
-    { id: 'inspiration', label: '3. Inspiration', icon: ImageIcon },
-    { id: 'direction', label: '4. Direction', icon: Compass },
-    { id: 'brief', label: '5. Design Brief', icon: FileText },
-    { id: 'prompt', label: '6. Prompt Package', icon: Sparkles }
+    { id: 'idea', label: '1. Idea & Concepts', icon: Lightbulb },
+    { id: 'direction', label: '2. Visual Direction', icon: Compass },
+    { id: 'brief', label: '3. Design Brief', icon: FileText },
+    { id: 'prompt', label: '4. Prompt Package', icon: Sparkles }
   ];
 
   const handleExploreConcepts = async (modelOverride?: string) => {
@@ -72,49 +97,24 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
       const conceptsWithModel = (data.concepts || []).map((c: any, idx: number) => ({
         ...c,
         id: c.id || 'concept-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).substring(2, 6),
-        modelUsed: data.modelUsed ? getModelConfig(data.modelUsed).displayName : (modelOverride ? getModelConfig(modelOverride).displayName : undefined)
+        modelUsed: data.modelUsed
+          ? getModelConfig(data.modelUsed).displayName
+          : modelOverride
+          ? getModelConfig(modelOverride).displayName
+          : undefined
       }));
 
       const updatedProject: ImageProject = {
         ...activeProject,
         status: 'concepts',
-        visualConcepts: conceptsWithModel
+        visualConcepts: conceptsWithModel,
+        conceptSelections: {}
       };
       handleUpdateProject(updatedProject);
-      onSelectStep('concepts');
+      // Stay on 'idea' ("Idea & Concepts") so the user can review concepts and pick a Primary concept
     } catch (err: any) {
       console.error('Error exploring concepts:', err);
       setErrorMessage(err.message || 'Error generating concepts');
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleAnalyzeReference = async (ref: InspirationReference, modelOverride?: string): Promise<ReferenceAnalysis> => {
-    setIsGenerating(true);
-    setErrorMessage(null);
-    try {
-      const res = await fetch(getApiUrl('/api/image-studio/analyze-reference'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: safeStringify({
-          referenceName: ref.name,
-          referenceType: ref.type,
-          notes: ref.notes,
-          imageDataBase64: ref.imageDataUrl,
-          model: modelOverride
-        })
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || 'Failed to analyze reference');
-      return {
-        ...data.analysis,
-        modelUsed: data.modelUsed ? getModelConfig(data.modelUsed).displayName : undefined
-      };
-    } catch (err: any) {
-      console.error('Error analyzing reference:', err);
-      setErrorMessage(err.message || 'Error analyzing reference image');
-      throw err;
     } finally {
       setIsGenerating(false);
     }
@@ -142,7 +142,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
           secondary: secondaryConcepts
         },
         creativeDirection: activeProject.creativeDirection,
-        selectedReferenceCharacteristics: activeProject.selectedReferenceCharacteristics,
+        selectedReferenceCharacteristics: activeProject.selectedReferenceCharacteristics || [],
         visualDirection: activeProject.visualDirection,
         outputMode: activeProject.outputMode,
         intendedOutput: activeProject.intendedOutput,
@@ -220,31 +220,31 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       const target = e.target as HTMLElement;
-      if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT')) {
+      if (
+        target &&
+        (target.tagName === 'TEXTAREA' ||
+          target.tagName === 'INPUT' ||
+          target.tagName === 'SELECT' ||
+          target.tagName === 'BUTTON')
+      ) {
         return;
       }
-      if (isGenerating) return;
+      if (isGenerating || !activeProject) return;
 
-      if (activeStep === 'idea') {
-        if (activeProject.imageIdea?.idea?.trim()) {
+      if (normalizedStep === 'idea') {
+        const hasConcepts = (activeProject.visualConcepts?.length || 0) > 0;
+        const hasPrimary = Object.values(activeProject.conceptSelections || {}).some(r => r === 'primary');
+        if (hasConcepts && hasPrimary) {
           e.preventDefault();
-          handleExploreConcepts();
+          onSelectStep('direction');
         }
-      } else if (activeStep === 'concepts') {
-        e.preventDefault();
-        onSelectStep('inspiration');
-      } else if (activeStep === 'inspiration') {
-        e.preventDefault();
-        onSelectStep('direction');
-      } else if (activeStep === 'direction') {
+      } else if (normalizedStep === 'direction') {
         e.preventDefault();
         onSelectStep('brief');
-      } else if (activeStep === 'brief') {
-        e.preventDefault();
+      } else if (normalizedStep === 'brief') {
         if (activeProject.designBrief) {
+          e.preventDefault();
           onSelectStep('prompt');
-        } else {
-          handleCreateBrief();
         }
       }
     }
@@ -287,7 +287,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
           <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-300 overflow-x-auto">
             {steps.map((step) => {
               const StepIcon = step.icon;
-              const isActive = activeStep === step.id;
+              const isActive = normalizedStep === step.id;
               return (
                 <button
                   key={step.id}
@@ -317,36 +317,17 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
           </div>
         )}
 
-        {activeStep === 'idea' && (
+        {normalizedStep === 'idea' && (
           <IdeaStep
             project={activeProject}
             onUpdateProject={handleUpdateProject}
             onExploreConcepts={handleExploreConcepts}
-            isGenerating={isGenerating}
-          />
-        )}
-
-        {activeStep === 'concepts' && (
-          <ConceptsStep
-            project={activeProject}
-            onUpdateProject={handleUpdateProject}
-            onExploreConcepts={handleExploreConcepts}
-            onNextStep={() => onSelectStep('inspiration')}
-            isGenerating={isGenerating}
-          />
-        )}
-
-        {activeStep === 'inspiration' && (
-          <InspirationStep
-            project={activeProject}
-            onUpdateProject={handleUpdateProject}
-            onAnalyzeReference={handleAnalyzeReference}
             onNextStep={() => onSelectStep('direction')}
-            isAnalyzing={isGenerating}
+            isGenerating={isGenerating}
           />
         )}
 
-        {activeStep === 'direction' && (
+        {normalizedStep === 'direction' && (
           <DirectionStep
             project={activeProject}
             onUpdateProject={handleUpdateProject}
@@ -354,7 +335,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
           />
         )}
 
-        {activeStep === 'brief' && (
+        {normalizedStep === 'brief' && (
           <BriefStep
             project={activeProject}
             onUpdateProject={handleUpdateProject}
@@ -364,7 +345,7 @@ export const ImageStudioWorkspace: React.FC<ImageStudioWorkspaceProps> = ({
           />
         )}
 
-        {activeStep === 'prompt' && (
+        {normalizedStep === 'prompt' && (
           <PromptStep
             project={activeProject}
             onUpdateProject={handleUpdateProject}

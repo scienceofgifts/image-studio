@@ -20,7 +20,9 @@ const STORAGE_KEYS = {
   INSPIRATION_LIBRARY: 'sog_inspiration_library_v2',
   VISUAL_PROFILES: 'sog_visual_profiles_v2',
   SYNTHESIS_CONCEPTS: 'sog_synthesis_concepts_v2',
-  DIRECTION_PROFILES: 'sog_direction_profiles_v1'
+  DIRECTION_PROFILES: 'sog_direction_profiles_v1',
+  USER_PREFERENCES: 'sog_user_preferences_v1',
+  LAST_DIRECTION_PROFILE: 'sog_last_used_direction_profile_v1'
 };
 
 const FIRESTORE_COLLECTIONS = {
@@ -29,12 +31,112 @@ const FIRESTORE_COLLECTIONS = {
   INSPIRATION_LIBRARY: 'inspiration_library',
   VISUAL_PROFILES: 'visual_profiles',
   SYNTHESIS_CONCEPTS: 'synthesis_concepts',
-  DIRECTION_PROFILES: 'direction_profiles'
+  DIRECTION_PROFILES: 'direction_profiles',
+  USER_PREFERENCES: 'user_preferences'
 };
 
 function cleanForFirestore<T>(data: T): Record<string, any> {
   return JSON.parse(JSON.stringify(data));
 }
+
+function compactStorageForQuota(): void {
+  try {
+    const tombstoneKeys = [
+      STORAGE_KEYS.IMAGE_PROJECTS,
+      STORAGE_KEYS.INSPIRATION_LIBRARY,
+      STORAGE_KEYS.SAVED_CONCEPTS,
+      STORAGE_KEYS.SYNTHESIS_CONCEPTS
+    ];
+
+    for (const k of tombstoneKeys) {
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      try {
+        const list = JSON.parse(raw);
+        if (!Array.isArray(list)) continue;
+        let changed = false;
+        const compacted = list.map((item: any) => {
+          if (item && item.isDeleted) {
+            changed = true;
+            return {
+              id: item.id,
+              isDeleted: true,
+              deletedAt: item.deletedAt || item.updatedAt || new Date().toISOString(),
+              updatedAt: item.updatedAt || item.deletedAt || new Date().toISOString()
+            };
+          }
+          if (item && typeof item.imageDataUrl === 'string' && item.imageDataUrl.length > 50000) {
+            changed = true;
+            const { imageDataUrl, ...rest } = item;
+            return rest;
+          }
+          return item;
+        });
+        if (changed) {
+          localStorage.setItem(k, JSON.stringify(compacted));
+        }
+      } catch {
+        // Ignore
+      }
+    }
+
+    const ideaKey = 'scienceOfGifts.ideaExplorer.v1.ideas';
+    const rawIdeas = localStorage.getItem(ideaKey);
+    if (rawIdeas) {
+      try {
+        const ideas = JSON.parse(rawIdeas);
+        if (Array.isArray(ideas) && ideas.length > 60) {
+          localStorage.setItem(ideaKey, JSON.stringify(ideas.slice(-60)));
+        }
+      } catch {
+        // Ignore
+      }
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+const memoryFallbackStore = new Map<string, string>();
+let memoryLastUsedProfileId: string | null = null;
+
+export function notifyStorageUpdated(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('sog-storage-updated'));
+  }
+}
+
+function safeLocalGet(key: string): string | null {
+  try {
+    const val = localStorage.getItem(key);
+    if (val !== null) return val;
+  } catch {
+    // Ignore read errors
+  }
+  return memoryFallbackStore.get(key) ?? null;
+}
+
+function safeLocalSet(key: string, value: any): boolean {
+  const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+  memoryFallbackStore.set(key, serialized);
+  try {
+    localStorage.setItem(key, serialized);
+    return true;
+  } catch {
+    compactStorageForQuota();
+    try {
+      if (Array.isArray(value) && key === 'scienceOfGifts.ideaExplorer.v1.ideas' && value.length > 50) {
+        localStorage.setItem(key, JSON.stringify(value.slice(-50)));
+        return true;
+      }
+      localStorage.setItem(key, serialized);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 
 // Seed sample initial image project
 const SAMPLE_IMAGE_PROJECT: ImageProject = {
@@ -243,38 +345,21 @@ const SAMPLE_VISUAL_PROFILE: VisualProfile = {
 
 export function getImageProjects(): ImageProject[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.IMAGE_PROJECTS);
+    const raw = safeLocalGet(STORAGE_KEYS.IMAGE_PROJECTS);
     if (!raw) {
       const initial = [SAMPLE_IMAGE_PROJECT];
-      localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(initial));
+      safeLocalSet(STORAGE_KEYS.IMAGE_PROJECTS, initial);
       return initial;
     }
     const projects: ImageProject[] = JSON.parse(raw);
     if (!Array.isArray(projects)) return [SAMPLE_IMAGE_PROJECT];
 
-    // Filter out soft-deleted records
+    // Filter out soft-deleted records.
+    // IMPORTANT: Do NOT auto-inject synthesized visualDirection.parameters onto unconfigured projects here,
+    // because doing so masks whether a new project has had a Direction Profile or custom parameters applied.
     const activeProjects = projects.filter(p => !p.isDeleted);
 
-    let hasMigration = false;
-    const result = activeProjects.map(proj => {
-      if (proj.visualDirection && !proj.visualDirection.parameters) {
-        hasMigration = true;
-        return {
-          ...proj,
-          visualDirection: {
-            ...proj.visualDirection,
-            parameters: synthesizeParametersFromDirection(proj.visualDirection)
-          }
-        };
-      }
-      return proj;
-    });
-
-    if (hasMigration) {
-      localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(projects));
-    }
-
-    return result.length > 0 ? result : [SAMPLE_IMAGE_PROJECT];
+    return activeProjects.length > 0 ? activeProjects : [SAMPLE_IMAGE_PROJECT];
   } catch (e) {
     console.error('Failed to load image projects:', e);
     return [SAMPLE_IMAGE_PROJECT];
@@ -298,11 +383,7 @@ export function saveImageProject(project: ImageProject): void {
       allProjects.unshift(updatedProject);
     }
     
-    try {
-      localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(allProjects));
-    } catch (setItemError) {
-      console.warn('LocalStorage error saving project, continuing with Firestore sync:', setItemError);
-    }
+    safeLocalSet(STORAGE_KEYS.IMAGE_PROJECTS, allProjects);
 
     // Asynchronously write to Firestore
     if (isFirebaseConfigured() && project.id) {
@@ -321,14 +402,14 @@ export function deleteImageProject(id: string): void {
     const allProjects: ImageProject[] = raw ? JSON.parse(raw) : [];
     const now = new Date().toISOString();
 
-    // Mark as soft-deleted tombstone locally
+    // Mark as compact soft-deleted tombstone locally
     const updated = allProjects.map(p => {
       if (p.id === id) {
-        return { ...p, isDeleted: true, deletedAt: now, updatedAt: now };
+        return { id: p.id, title: p.title || '', isDeleted: true, deletedAt: now, updatedAt: now } as unknown as ImageProject;
       }
       return p;
     });
-    localStorage.setItem(STORAGE_KEYS.IMAGE_PROJECTS, JSON.stringify(updated));
+    safeLocalSet(STORAGE_KEYS.IMAGE_PROJECTS, updated);
 
     // Asynchronously update Firestore tombstone
     if (isFirebaseConfigured() && id) {
@@ -468,11 +549,7 @@ export function saveInspirationItem(item: InspirationReference): void {
       allLibrary.unshift(updatedItem);
     }
     
-    try {
-      localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(allLibrary));
-    } catch (setItemError) {
-      console.warn('LocalStorage error on inspiration item, continuing:', setItemError);
-    }
+    safeLocalSet(STORAGE_KEYS.INSPIRATION_LIBRARY, allLibrary);
 
     // Asynchronously write to Firestore
     if (isFirebaseConfigured() && item.id) {
@@ -493,11 +570,11 @@ export function deleteInspirationItem(id: string): void {
 
     const updated = allLibrary.map(i => {
       if (i.id === id) {
-        return { ...i, isDeleted: true, deletedAt: now, updatedAt: now };
+        return { id: i.id, name: i.name || '', isDeleted: true, deletedAt: now, updatedAt: now } as unknown as InspirationReference;
       }
       return i;
     });
-    localStorage.setItem(STORAGE_KEYS.INSPIRATION_LIBRARY, JSON.stringify(updated));
+    safeLocalSet(STORAGE_KEYS.INSPIRATION_LIBRARY, updated);
 
     if (isFirebaseConfigured() && id) {
       setDoc(doc(db, FIRESTORE_COLLECTIONS.INSPIRATION_LIBRARY, id), {
@@ -663,7 +740,8 @@ export function exportAllData(): string {
     inspirationLibrary: getInspirationLibrary(),
     visualProfiles: getVisualProfiles(),
     synthesisConcepts: getSynthesisConcepts(),
-    directionProfiles: getDirectionProfiles()
+    directionProfiles: getDirectionProfiles(),
+    lastUsedDirectionProfileId: getLastUsedDirectionProfileId()
   };
   return JSON.stringify(data, null, 2);
 }
@@ -688,6 +766,9 @@ export function importAllData(jsonStr: string): boolean {
     }
     if (Array.isArray(data.directionProfiles)) {
       localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(data.directionProfiles.map(ensureProfileParameters)));
+    }
+    if (typeof data.lastUsedDirectionProfileId === 'string') {
+      setLastUsedDirectionProfileId(data.lastUsedDirectionProfileId);
     }
     return true;
   } catch (e) {
@@ -1024,18 +1105,58 @@ export function ensureProfileParameters(profile: DirectionProfile): DirectionPro
   return cloned;
 }
 
+export function isProjectEligibleForAutoProfile(project: ImageProject): boolean {
+  if (!project) return false;
+
+  // 1. If the project already has a directionProfileId (including '' when explicitly cleared or customized), preserve it
+  if (project.directionProfileId !== undefined) {
+    return false;
+  }
+
+  // 2. If the project already has a generated Design Brief or Final Prompt, never overwrite its visual direction
+  if (project.designBrief || project.finalPrompt) {
+    return false;
+  }
+
+  // 3. Check whether visualDirection.parameters was genuinely customized by the user
+  const vd = project.visualDirection;
+  if (!vd || !vd.parameters) {
+    return true;
+  }
+
+  // If the base visualDirection text fields are empty (as initialized by NewProjectModal), parameters was only auto-synthesized by legacy getImageProjects()
+  if (!vd.composition && !vd.typography && !vd.illustration) {
+    return true;
+  }
+
+  // If parameters matches the automatic synthesizeParametersFromDirection output, it was never manually customized in Stage 2
+  const synthesizedDefault = synthesizeParametersFromDirection(vd);
+  if (JSON.stringify(vd.parameters) === JSON.stringify(synthesizedDefault)) {
+    return true;
+  }
+
+  return false;
+}
+
 export function getDirectionProfiles(): DirectionProfile[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.DIRECTION_PROFILES);
+    const raw = safeLocalGet(STORAGE_KEYS.DIRECTION_PROFILES);
     if (!raw) {
       const clonedDefaults = JSON.parse(JSON.stringify(DEFAULT_DIRECTION_PROFILES));
-      localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(clonedDefaults));
+      safeLocalSet(STORAGE_KEYS.DIRECTION_PROFILES, clonedDefaults);
       return clonedDefaults;
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      // Filter out soft-deleted records and normalize
-      return parsed.filter((p: DirectionProfile) => !p.isDeleted).map(ensureProfileParameters);
+      // Ensure built-in default profiles remain available unless explicitly deleted by the user
+      const existingIds = new Set(parsed.map((p: any) => p?.id).filter(Boolean));
+      const merged = [...parsed];
+      DEFAULT_DIRECTION_PROFILES.forEach(def => {
+        if (!existingIds.has(def.id)) {
+          merged.push(JSON.parse(JSON.stringify(def)));
+        }
+      });
+      return merged.filter((p: DirectionProfile) => p && !p.isDeleted).map(ensureProfileParameters);
     }
     return JSON.parse(JSON.stringify(DEFAULT_DIRECTION_PROFILES));
   } catch (e) {
@@ -1046,7 +1167,7 @@ export function getDirectionProfiles(): DirectionProfile[] {
 
 export function saveDirectionProfile(profile: DirectionProfile): void {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.DIRECTION_PROFILES);
+    const raw = safeLocalGet(STORAGE_KEYS.DIRECTION_PROFILES);
     const allProfiles: DirectionProfile[] = raw ? JSON.parse(raw) : JSON.parse(JSON.stringify(DEFAULT_DIRECTION_PROFILES));
     const sanitized = ensureProfileParameters(profile);
     const updatedProfile: DirectionProfile = { 
@@ -1061,12 +1182,13 @@ export function saveDirectionProfile(profile: DirectionProfile): void {
     } else {
       allProfiles.unshift(updatedProfile);
     }
-    localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(allProfiles));
+    safeLocalSet(STORAGE_KEYS.DIRECTION_PROFILES, allProfiles);
 
     if (isFirebaseConfigured() && profile.id) {
       setDoc(doc(db, FIRESTORE_COLLECTIONS.DIRECTION_PROFILES, profile.id), cleanForFirestore(updatedProfile), { merge: true })
         .catch(err => console.warn('[Firestore] Direction profile sync write failed:', err));
     }
+    notifyStorageUpdated();
   } catch (e) {
     console.error('Failed to save direction profile:', e);
   }
@@ -1074,7 +1196,7 @@ export function saveDirectionProfile(profile: DirectionProfile): void {
 
 export function deleteDirectionProfile(id: string): void {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.DIRECTION_PROFILES);
+    const raw = safeLocalGet(STORAGE_KEYS.DIRECTION_PROFILES);
     const allProfiles: DirectionProfile[] = raw ? JSON.parse(raw) : JSON.parse(JSON.stringify(DEFAULT_DIRECTION_PROFILES));
     const now = new Date().toISOString();
 
@@ -1084,7 +1206,12 @@ export function deleteDirectionProfile(id: string): void {
       }
       return p;
     });
-    localStorage.setItem(STORAGE_KEYS.DIRECTION_PROFILES, JSON.stringify(updated));
+    safeLocalSet(STORAGE_KEYS.DIRECTION_PROFILES, updated);
+
+    // If the deleted profile was the last-used profile, clear it gracefully
+    if (getLastUsedDirectionProfileId() === id || memoryLastUsedProfileId === id) {
+      setLastUsedDirectionProfileId('');
+    }
 
     if (isFirebaseConfigured() && id) {
       setDoc(doc(db, FIRESTORE_COLLECTIONS.DIRECTION_PROFILES, id), {
@@ -1094,8 +1221,181 @@ export function deleteDirectionProfile(id: string): void {
         updatedAt: now
       }, { merge: true }).catch(err => console.warn('[Firestore] Direction profile soft delete failed:', err));
     }
+    notifyStorageUpdated();
   } catch (e) {
     console.error('Failed to delete direction profile:', e);
+  }
+}
+
+export interface UserPreferenceRecord {
+  id: string;
+  profileId: string;
+  updatedAt: string;
+}
+
+export function getLastUsedDirectionProfileId(): string {
+  try {
+    const activeProfiles = getDirectionProfiles();
+    if (activeProfiles.length === 0) return '';
+
+    let candidateId = '';
+    let hasExplicitRecord = false;
+
+    if (memoryLastUsedProfileId !== null) {
+      hasExplicitRecord = true;
+      candidateId = memoryLastUsedProfileId;
+    } else {
+      const rawPrefs = safeLocalGet(STORAGE_KEYS.USER_PREFERENCES);
+      if (rawPrefs) {
+        try {
+          const prefs: UserPreferenceRecord[] = JSON.parse(rawPrefs);
+          if (Array.isArray(prefs)) {
+            const record = prefs.find(p => p && p.id === 'last_direction_profile');
+            if (record && typeof record.profileId === 'string') {
+              hasExplicitRecord = true;
+              candidateId = record.profileId;
+            }
+          }
+        } catch {
+          // Ignore malformed prefs
+        }
+      }
+
+      if (!hasExplicitRecord) {
+        const directStored = safeLocalGet(STORAGE_KEYS.LAST_DIRECTION_PROFILE);
+        if (directStored !== null) {
+          hasExplicitRecord = true;
+          candidateId = directStored;
+        }
+      }
+    }
+
+    if (hasExplicitRecord) {
+      if (!candidateId) return '';
+      const matched =
+        activeProfiles.find(p => p.id === candidateId) ||
+        activeProfiles.find(p => p.name === candidateId);
+      return matched ? matched.id : '';
+    }
+
+    // Fallback recovery: If no explicit preference record has been saved yet,
+    // inspect existing projects (most recently updated first) to find the last profile the user selected.
+    const rawProjects = safeLocalGet(STORAGE_KEYS.IMAGE_PROJECTS);
+    if (rawProjects) {
+      try {
+        const parsedProjects: ImageProject[] = JSON.parse(rawProjects);
+        if (Array.isArray(parsedProjects)) {
+          const validProjects = parsedProjects
+            .filter(p => p && !p.isDeleted)
+            .sort((a, b) => {
+              // Prioritize user-created projects over the seeded sample project
+              const aIsSample = a.id === 'proj-history-teacher-01' ? 1 : 0;
+              const bIsSample = b.id === 'proj-history-teacher-01' ? 1 : 0;
+              if (aIsSample !== bIsSample) return aIsSample - bIsSample;
+              const tA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+              const tB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+              return tB - tA;
+            });
+
+          // 1. Check non-sample projects with an explicit directionProfileId
+          for (const proj of validProjects) {
+            if (proj.id !== 'proj-history-teacher-01' && proj.directionProfileId) {
+              const matched =
+                activeProfiles.find(p => p.id === proj.directionProfileId) ||
+                activeProfiles.find(p => p.name === proj.directionProfileId);
+              if (matched) {
+                setLastUsedDirectionProfileId(matched.id);
+                return matched.id;
+              }
+            }
+          }
+
+          // 2. Check if the user has created any custom Direction Profiles
+          const defaultIds = new Set(DEFAULT_DIRECTION_PROFILES.map(d => d.id));
+          const customProfiles = activeProfiles
+            .filter(p => !defaultIds.has(p.id))
+            .sort((a, b) => {
+              const tA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+              const tB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+              return tB - tA;
+            });
+          if (customProfiles.length > 0) {
+            setLastUsedDirectionProfileId(customProfiles[0].id);
+            return customProfiles[0].id;
+          }
+
+          // 3. Check if any project (including sample if present) has a valid directionProfileId
+          for (const proj of validProjects) {
+            if (proj.directionProfileId) {
+              const matched = activeProfiles.find(p => p.id === proj.directionProfileId);
+              if (matched) {
+                setLastUsedDirectionProfileId(matched.id);
+                return matched.id;
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignore project parse errors
+      }
+    }
+
+    return '';
+  } catch (e) {
+    console.error('Failed to read last used direction profile ID:', e);
+    return '';
+  }
+}
+
+export function setLastUsedDirectionProfileId(profileId: string): void {
+  try {
+    const cleanId = profileId ? profileId.trim() : '';
+    memoryLastUsedProfileId = cleanId;
+
+    if (cleanId) {
+      safeLocalSet(STORAGE_KEYS.LAST_DIRECTION_PROFILE, cleanId);
+    } else {
+      memoryFallbackStore.set(STORAGE_KEYS.LAST_DIRECTION_PROFILE, '');
+      try {
+        localStorage.removeItem(STORAGE_KEYS.LAST_DIRECTION_PROFILE);
+      } catch {
+        // Ignore
+      }
+    }
+
+    const now = new Date().toISOString();
+    const record: UserPreferenceRecord = {
+      id: 'last_direction_profile',
+      profileId: cleanId,
+      updatedAt: now
+    };
+
+    const rawPrefs = safeLocalGet(STORAGE_KEYS.USER_PREFERENCES);
+    let prefs: UserPreferenceRecord[] = [];
+    if (rawPrefs) {
+      try {
+        const parsed = JSON.parse(rawPrefs);
+        if (Array.isArray(parsed)) prefs = parsed;
+      } catch {
+        prefs = [];
+      }
+    }
+
+    const idx = prefs.findIndex(p => p && p.id === 'last_direction_profile');
+    if (idx >= 0) {
+      prefs[idx] = record;
+    } else {
+      prefs.push(record);
+    }
+    safeLocalSet(STORAGE_KEYS.USER_PREFERENCES, prefs);
+
+    if (isFirebaseConfigured()) {
+      setDoc(doc(db, FIRESTORE_COLLECTIONS.USER_PREFERENCES, 'last_direction_profile'), cleanForFirestore(record), { merge: true })
+        .catch(err => console.warn('[Firestore] Last used direction profile sync write failed:', err));
+    }
+    notifyStorageUpdated();
+  } catch (e) {
+    console.error('Failed to save last used direction profile ID:', e);
   }
 }
 
@@ -1170,7 +1470,7 @@ async function syncCollection<T extends { id: string; updatedAt?: string; create
     await Promise.allSettled(uploadPromises);
 
     const mergedList = Array.from(mergedMap.values());
-    localStorage.setItem(storageKey, JSON.stringify(mergedList));
+    safeLocalSet(storageKey, mergedList);
   } catch (err) {
     console.warn(`[Storage Sync] Notice syncing collection '${collectionName}':`, err);
   }
@@ -1208,11 +1508,32 @@ export async function syncDataFromCloud(): Promise<{
       syncCollection<VisualProfile>(FIRESTORE_COLLECTIONS.VISUAL_PROFILES, STORAGE_KEYS.VISUAL_PROFILES),
       syncCollection<SynthesisConcept>(FIRESTORE_COLLECTIONS.SYNTHESIS_CONCEPTS, STORAGE_KEYS.SYNTHESIS_CONCEPTS),
       syncCollection<DirectionProfile>(FIRESTORE_COLLECTIONS.DIRECTION_PROFILES, STORAGE_KEYS.DIRECTION_PROFILES),
+      syncCollection<UserPreferenceRecord>(FIRESTORE_COLLECTIONS.USER_PREFERENCES, STORAGE_KEYS.USER_PREFERENCES),
       syncCollection<any>('idea_explorer_sessions', 'scienceOfGifts.ideaExplorer.v1.sessions'),
       syncCollection<any>('idea_explorer_batches', 'scienceOfGifts.ideaExplorer.v1.batches'),
       syncCollection<any>('idea_explorer_ideas', 'scienceOfGifts.ideaExplorer.v1.ideas'),
       syncCollection<any>('idea_explorer_saved', 'scienceOfGifts.ideaExplorer.v1.saved')
     ]);
+    // Keep LAST_DIRECTION_PROFILE key and memoryLastUsedProfileId in sync with synced USER_PREFERENCES
+    const rawPrefs = safeLocalGet(STORAGE_KEYS.USER_PREFERENCES);
+    if (rawPrefs) {
+      const prefs: UserPreferenceRecord[] = JSON.parse(rawPrefs);
+      const record = Array.isArray(prefs) ? prefs.find(p => p && p.id === 'last_direction_profile') : undefined;
+      if (record && typeof record.profileId === 'string') {
+        memoryLastUsedProfileId = record.profileId;
+        if (record.profileId) {
+          safeLocalSet(STORAGE_KEYS.LAST_DIRECTION_PROFILE, record.profileId);
+        } else {
+          memoryFallbackStore.set(STORAGE_KEYS.LAST_DIRECTION_PROFILE, '');
+          try {
+            localStorage.removeItem(STORAGE_KEYS.LAST_DIRECTION_PROFILE);
+          } catch {
+            // Ignore
+          }
+        }
+      }
+    }
+    notifyStorageUpdated();
     console.log('[Storage Sync] Bi-directional Firestore synchronization completed.');
   } catch (err) {
     console.warn('[Storage Sync] Firestore sync notice:', err);

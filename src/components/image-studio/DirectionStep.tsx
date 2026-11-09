@@ -1,13 +1,40 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ImageProject, StructuredVisualDirection, DirectionProfile } from '../../types';
 import { StructuredVisualParametersSelector } from './StructuredVisualParametersSelector';
-import { getDirectionProfiles, saveDirectionProfile, deleteDirectionProfile } from '../../utils/storage';
-import { Compass, ArrowRight, Edit3, Sliders, Plus, Save, Trash2, Copy, Check, RefreshCw } from 'lucide-react';
+import {
+  getDirectionProfiles,
+  saveDirectionProfile,
+  deleteDirectionProfile,
+  getLastUsedDirectionProfileId,
+  setLastUsedDirectionProfileId,
+  isProjectEligibleForAutoProfile
+} from '../../utils/storage';
+import { Compass, ArrowRight, Edit3, Sliders, Plus, Save, Trash2, Copy, Check } from 'lucide-react';
 
 interface DirectionStepProps {
   project: ImageProject;
   onUpdateProject: (updated: ImageProject) => void;
   onNextStep: () => void;
+}
+
+function getAutoApplicableProfile(
+  project: ImageProject,
+  availableProfiles: DirectionProfile[]
+): DirectionProfile | null {
+  if (!isProjectEligibleForAutoProfile(project)) {
+    return null;
+  }
+
+  const lastUsedId = getLastUsedDirectionProfileId();
+  if (!lastUsedId) {
+    return null;
+  }
+
+  return (
+    availableProfiles.find(p => p.id === lastUsedId) ||
+    availableProfiles.find(p => p.name === lastUsedId) ||
+    null
+  );
 }
 
 export const DirectionStep: React.FC<DirectionStepProps> = ({
@@ -16,21 +43,117 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
   onNextStep
 }) => {
   const [profiles, setProfiles] = useState<DirectionProfile[]>(() => getDirectionProfiles());
-  const [selectedProfileId, setSelectedProfileId] = useState<string>(project.directionProfileId || '');
-  const [creativeDir, setCreativeDir] = useState<string>(project.creativeDirection || '');
+  const [storageSyncTick, setStorageSyncTick] = useState<number>(0);
+
+  const autoProfileOnMount = getAutoApplicableProfile(project, profiles);
+
+  const [selectedProfileId, setSelectedProfileId] = useState<string>(() => {
+    if (project.directionProfileId) {
+      const matched =
+        profiles.find(p => p.id === project.directionProfileId) ||
+        profiles.find(p => p.name === project.directionProfileId);
+      return matched ? matched.id : '';
+    }
+    if (autoProfileOnMount) {
+      return autoProfileOnMount.id;
+    }
+    return '';
+  });
+
+  const [creativeDir, setCreativeDir] = useState<string>(() => {
+    if (autoProfileOnMount && autoProfileOnMount.creativeDirection) {
+      return autoProfileOnMount.creativeDirection;
+    }
+    return project.creativeDirection || '';
+  });
+
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
 
-  // Keep selectedProfileId in sync when project changes or when project.directionProfileId updates
-  useEffect(() => {
-    setSelectedProfileId(project.directionProfileId || '');
-  }, [project.id, project.directionProfileId]);
+  // Track which project ID has had a final profile resolution so we don't re-apply after user edits,
+  // while still allowing async cloud sync to apply a profile if none was available on initial mount.
+  const resolvedProjectIdRef = useRef<string | null>(null);
 
-  // Keep creativeDir in sync when project changes or creativeDirection updates
+  // Listen for storage/cloud sync updates so async Firestore profile/preference loads take effect immediately
   useEffect(() => {
+    const handleStorageUpdated = () => {
+      setProfiles(getDirectionProfiles());
+      setStorageSyncTick(t => t + 1);
+    };
+    window.addEventListener('sog-storage-updated', handleStorageUpdated);
+    return () => {
+      window.removeEventListener('sog-storage-updated', handleStorageUpdated);
+    };
+  }, []);
+
+  useEffect(() => {
+    const currentProfiles = getDirectionProfiles();
+    setProfiles(currentProfiles);
+
+    // Case 1: Project already has an explicit directionProfileId (or '' when explicitly cleared/customized)
+    if (project.directionProfileId !== undefined) {
+      if (!project.directionProfileId) {
+        resolvedProjectIdRef.current = project.id;
+        setSelectedProfileId('');
+        setCreativeDir(project.creativeDirection || '');
+        return;
+      }
+
+      const existingProf =
+        currentProfiles.find(p => p.id === project.directionProfileId) ||
+        currentProfiles.find(p => p.name === project.directionProfileId);
+
+      if (existingProf) {
+        resolvedProjectIdRef.current = project.id;
+        setSelectedProfileId(existingProf.id);
+      } else {
+        // Profile was deleted or hasn't arrived from async sync yet: fall back to placeholder without overwriting project's visualDirection
+        setSelectedProfileId('');
+      }
+      setCreativeDir(project.creativeDirection || '');
+      return;
+    }
+
+    // If we already resolved this project, do not re-run auto-application
+    if (resolvedProjectIdRef.current === project.id) {
+      return;
+    }
+
+    // Case 2: Project has no directionProfileId yet — check if eligible for auto-applying last-used profile
+    if (isProjectEligibleForAutoProfile(project)) {
+      const autoProf = getAutoApplicableProfile(project, currentProfiles);
+      if (autoProf) {
+        resolvedProjectIdRef.current = project.id;
+        const clonedVisualDirection: StructuredVisualDirection = JSON.parse(
+          JSON.stringify(autoProf.visualDirection)
+        );
+        const newCreativeDir = autoProf.creativeDirection
+          ? autoProf.creativeDirection
+          : (project.creativeDirection || '');
+
+        setSelectedProfileId(autoProf.id);
+        setCreativeDir(newCreativeDir);
+        onUpdateProject({
+          ...project,
+          directionProfileId: autoProf.id,
+          visualDirection: clonedVisualDirection,
+          creativeDirection: newCreativeDir
+        });
+        return;
+      }
+
+      // No last-used profile available yet (may still arrive via async cloud sync, so keep resolvedProjectIdRef null)
+      setSelectedProfileId('');
+      setCreativeDir(project.creativeDirection || '');
+      return;
+    }
+
+    // Case 3: Existing project with manually customized parameters or downstream brief/prompt — preserve existing state
+    resolvedProjectIdRef.current = project.id;
+    setSelectedProfileId('');
     setCreativeDir(project.creativeDirection || '');
-  }, [project.id, project.creativeDirection]);
+  }, [project.id, project.directionProfileId, storageSyncTick]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -40,6 +163,8 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
   const handleVisualDirectionChange = (updatedDirection: StructuredVisualDirection) => {
     onUpdateProject({
       ...project,
+      // Ensure directionProfileId is at least '' so manual customization is never overwritten later
+      directionProfileId: project.directionProfileId !== undefined ? project.directionProfileId : '',
       visualDirection: updatedDirection
     });
   };
@@ -48,6 +173,7 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
     setCreativeDir(val);
     onUpdateProject({
       ...project,
+      directionProfileId: project.directionProfileId !== undefined ? project.directionProfileId : '',
       creativeDirection: val
     });
   };
@@ -63,9 +189,13 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
     }
     const prof = profiles.find(p => p.id === profileId);
     if (prof) {
+      // Remember this profile as the most recently used profile
+      setLastUsedDirectionProfileId(prof.id);
+
       // Deep clone visualDirection into active project without mutating the saved profile
       const clonedVisualDirection = JSON.parse(JSON.stringify(prof.visualDirection));
-      const newCreativeDir = prof.creativeDirection !== undefined ? prof.creativeDirection : (project.creativeDirection || '');
+      const newCreativeDir =
+        prof.creativeDirection !== undefined ? prof.creativeDirection : (project.creativeDirection || '');
       setCreativeDir(newCreativeDir);
       onUpdateProject({
         ...project,
@@ -89,6 +219,7 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
       updatedAt: new Date().toISOString()
     };
     saveDirectionProfile(newProf);
+    setLastUsedDirectionProfileId(newProf.id);
     setProfiles(getDirectionProfiles());
     setSelectedProfileId(newProf.id);
     onUpdateProject({
@@ -115,6 +246,7 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
       updatedAt: new Date().toISOString()
     };
     saveDirectionProfile(updated);
+    setLastUsedDirectionProfileId(updated.id);
     setProfiles(getDirectionProfiles());
     onUpdateProject({
       ...project,
@@ -135,6 +267,7 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
       updatedAt: new Date().toISOString()
     };
     saveDirectionProfile(dup);
+    setLastUsedDirectionProfileId(dup.id);
     setProfiles(getDirectionProfiles());
     setSelectedProfileId(dup.id);
     onUpdateProject({
@@ -180,7 +313,11 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
     id => project.conceptSelections[id] === 'avoid'
   );
   const avoidConcepts = project.visualConcepts.filter(c => avoidIds.includes(c.id));
+
   const selectedProfile = profiles.find(p => p.id === selectedProfileId);
+  const effectiveVisualDirection = autoProfileOnMount
+    ? autoProfileOnMount.visualDirection
+    : project.visualDirection;
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 py-4 relative">
@@ -200,7 +337,7 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
           </div>
           <div>
             <span className="text-[10px] font-mono uppercase tracking-wider text-amber-800 font-semibold block mb-0.5">
-              STAGE 04 · HOW THE DESIGN LOOKS
+              STAGE 02 · HOW THE DESIGN LOOKS
             </span>
             <h2 className="text-xl font-serif text-stone-900 font-semibold">Visual Direction &amp; Style Profiles</h2>
             <p className="text-xs text-stone-600 mt-1 leading-relaxed">
@@ -329,7 +466,7 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
             {primaryConcept ? primaryConcept.conceptName : 'None explicitly set as primary'}
           </h3>
           <p className="text-xs text-stone-600 italic">
-            {primaryConcept ? primaryConcept.coreVisualIdea : 'Select a primary concept in Stage 2.'}
+            {primaryConcept ? primaryConcept.coreVisualIdea : 'Select a primary concept in Stage 1 (Idea & Concepts).'}
           </p>
         </div>
 
@@ -391,7 +528,7 @@ export const DirectionStep: React.FC<DirectionStepProps> = ({
         </h3>
 
         <StructuredVisualParametersSelector
-          value={project.visualDirection}
+          value={effectiveVisualDirection}
           onChange={handleVisualDirectionChange}
           creativeDirection={creativeDir}
           onCreativeDirectionChange={handleCreativeDirectionChange}
